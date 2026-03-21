@@ -44,7 +44,9 @@ def test_chief_reviewer_collects_debate_candidates_for_ambiguous_case(tmp_path: 
     build_docx_from_case(file_path, DEBATE_CANDIDATE_CASE)
 
     reviewer = ChiefReviewer()
-    reviewer.review_docx(Path(file_path))
+    report = reviewer.review_docx(Path(file_path))
 
     debate_dimensions = {case.dimension for case in reviewer.last_debate_candidates}
     assert Dimension.LOGIC_CHAIN in debate_dimensions or Dimension.NOVELTY_DEPTH in debate_dimensions
+    assert reviewer.last_debate_resolutions
+    assert any(item.debate_used for item in report.dimension_reports if item.dimension in debate_dimensions)

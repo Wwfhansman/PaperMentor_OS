@@ -1,4 +1,4 @@
-from papermentor_os.schemas.debate import DebateCase
+from papermentor_os.schemas.debate import DebateCase, DebateResolution
 from papermentor_os.schemas.report import (
     AdvisorView,
     DimensionReport,
@@ -8,12 +8,15 @@ from papermentor_os.schemas.report import (
     ReviewFinding,
     StudentGuidance,
 )
+from papermentor_os.schemas.trace import DebugReviewResponse, ReviewTrace
 from papermentor_os.schemas.types import Dimension, Discipline, PaperStage, Severity
 from papermentor_os.schemas.paper import PaperPackage, PaperReference, Section, Paragraph
 
 __all__ = [
     "AdvisorView",
     "DebateCase",
+    "DebateResolution",
+    "DebugReviewResponse",
     "Dimension",
     "DimensionReport",
     "Discipline",
@@ -25,6 +28,7 @@ __all__ = [
     "Paragraph",
     "PriorityAction",
     "ReviewFinding",
+    "ReviewTrace",
     "Section",
     "Severity",
     "StudentGuidance",

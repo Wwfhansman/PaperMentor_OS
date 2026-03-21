@@ -14,6 +14,7 @@ class SectionSpec:
 @dataclass(frozen=True)
 class ReviewCaseSpec:
     case_id: str
+    tags: tuple[str, ...]
     title: str
     abstract: str
     sections: tuple[SectionSpec, ...]
@@ -24,6 +25,7 @@ class ReviewCaseSpec:
 
 MINIMAL_REVIEW_CASE = ReviewCaseSpec(
     case_id="minimal_review_case",
+    tags=("baseline", "five_dimension", "research_first"),
     title="某系统设计与实现研究",
     abstract="本文提出一套论文评审辅助系统，目标是提升初审效率，但当前仅完成基础系统实现。",
     sections=(
@@ -57,6 +59,7 @@ MINIMAL_REVIEW_CASE = ReviewCaseSpec(
 
 DEBATE_CANDIDATE_CASE = ReviewCaseSpec(
     case_id="debate_candidate_case",
+    tags=("debate_candidate", "weak_sample", "boundary_case"),
     title="某系统设计与实现",
     abstract="本文设计了一个论文辅助系统。",
     sections=(
@@ -87,3 +90,8 @@ DEBATE_CANDIDATE_CASE = ReviewCaseSpec(
     ),
 )
 
+
+REVIEW_CASE_CATALOG = (
+    MINIMAL_REVIEW_CASE,
+    DEBATE_CANDIDATE_CASE,
+)

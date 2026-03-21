@@ -1,0 +1,21 @@
+id: severity-resolution-rubric
+name: Severity Resolution Rubric
+version: 0.1.0
+category: rubric
+owner_agent:
+  - DebateJudgeAgent
+applicable_disciplines:
+  - computer_science
+applicable_stages:
+  - draft
+  - final_draft
+required_inputs:
+  - dimension_report
+  - debate_case
+output_schema: debate-judging-schema
+policies:
+  - evidence-required-policy
+quality_gates:
+  - evidence_anchor_validity
+status: active
+

@@ -43,3 +43,12 @@ def test_skill_loader_resolves_novelty_worker_rubric() -> None:
     )
 
     assert bundle.rubric_skills[0].metadata.versioned_id == "novelty-depth-rubric@0.1.0"
+
+
+def test_skill_loader_can_load_debate_rubric_directly() -> None:
+    skill_root = Path(__file__).resolve().parents[2] / "skills"
+    loader = SkillLoader(skill_root)
+
+    skill = loader.load_skill("severity-resolution-rubric")
+
+    assert skill.metadata.versioned_id == "severity-resolution-rubric@0.1.0"

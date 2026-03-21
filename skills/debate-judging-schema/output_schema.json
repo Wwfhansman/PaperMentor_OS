@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "required": [
+    "dimension",
+    "trigger_reason",
+    "resolution_summary",
+    "adjusted_score",
+    "upheld_issue_titles",
+    "dropped_issue_titles",
+    "source_agent",
+    "source_skill_version"
+  ]
+}
+

@@ -1,0 +1,8 @@
+id: debate-judging-schema
+name: Debate Judging Schema
+version: 0.1.0
+category: output_schema
+owner_agent:
+  - DebateJudgeAgent
+status: active
+

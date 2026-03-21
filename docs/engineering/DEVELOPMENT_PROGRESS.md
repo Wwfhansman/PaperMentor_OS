@@ -34,13 +34,13 @@
   - `WritingFormatAgent`
 - 文件系统版最小 `SkillLoader`
 - FastAPI 最小接口入口
+- 非破坏式 debug review API，可返回 review trace
 - 显式按“研究内容优先于文本表达”整理的基础报告优先级逻辑
 - 最小 `disagreement detection`，可为未来 selective debate 提供候选 case
+- 最小 selective debate 闭环：`DebateJudgeAgent` 可对候选维度做受控裁决
 
 当前系统尚未具备：
 
-- selective debate
-- `DebateJudgeAgent`
 - PDF 报告导出
 - 完整评测样本集
 - UI 层
@@ -98,7 +98,7 @@
 当前特点：
 
 - 仍是确定性编排
-- 没有引入 debate
+- 已引入最小 selective debate，但还不是完整多 reviewer 裁决
 - 研究内容类问题在 ledger 优先级中高于写作格式类问题
 - 最终报告层也显式保证研究内容类问题优先于写作规范类问题
 
@@ -138,6 +138,7 @@
 - advisor view 区分研究内容类与写作规范类问题
 - 新增测试辅助 fixture，用于生成最小 `docx` 样本
 - 新增可枚举的 `review case` fixtures
+- 新增 `review case catalog`，用于组织 baseline / debate candidate 等样本
 
 当前限制：
 
@@ -151,17 +152,48 @@
 - 新增 `DebateCase` schema
 - 新增最小 `DisagreementDetector`
 - `ChiefReviewer` 运行后会记录 `last_debate_candidates`
-- 当前只对主观维度候选进行检测，不触发正式 debate
+- 当前只对主观维度候选进行检测，并交由最小 selective debate 复核
 
 当前限制：
 
 - 仍是单评审输出上的“歧义/边界情况”检测，不是真正多 reviewer 分歧检测
 - 候选结果尚未写入最终报告
 
+### 3.8 Selective Debate
+
+已完成：
+
+- 新增 `DebateResolution` schema
+- 新增 `DebateJudgeAgent`
+- `ChiefReviewer` 会对 `last_debate_candidates` 命中的主观维度执行最小裁决
+- `EvidenceLedger` 可记录 debate result
+- 被复核的维度会将 `debate_used` 标记为 `true`
+
+当前限制：
+
+- 仍不是多 reviewer 对比后的正式 debate，只是单次受控复核
+- debate 结果目前主要体现在维度 summary、findings 过滤和内部 trace 中
+- 最终报告没有单独展开 debate 过程明细
+
+### 3.9 API 与 Debug Trace
+
+已完成：
+
+- 保留正式 `/review/docx` 报告接口不变
+- 新增 `/review/docx/debug` 调试接口
+- debug 接口可返回 `debate_candidates` 和 `debate_resolutions`
+
+当前限制：
+
+- debug trace 只暴露 debate 相关内部状态，还没有暴露完整 skill/load/orchestration trace
+- 仍未做鉴权、访问控制或调试信息分级
+
 ## 4. 测试与验证
 
 截至 `2026-03-21`，当前已通过：
 
+- debug API 集成测试
+- selective debate 单元测试
 - schema 单元测试
 - disagreement detection 单元测试
 - `docx parser` 单元测试
@@ -171,17 +203,17 @@
 
 当前基线结果：
 
-- `pytest` 通过，当前为 `12 passed`
+- `pytest` 通过，当前为 `16 passed`
 
 ## 5. 下一步计划
 
 按当前顺序继续推进：
 
 1. 继续扩展 fixtures 和评测样本，覆盖强样本/弱样本/边界样本
-2. 再进入 `DebateJudgeAgent` 与 selective debate
-3. 评估 PDF 导出落点
-4. 逐步替换启发式规则为更强的 skill 驱动实现
-5. 评估 API 层是否需要暴露调试/trace 信息
+2. 评估 PDF 导出落点
+3. 逐步替换启发式规则为更强的 skill 驱动实现
+4. 继续补真实论文模板与样本覆盖
+5. 评估是否需要更多调试 trace（如 skill 选择与编排日志）
 
 ## 6. 当前风险
 
@@ -191,6 +223,7 @@
 - 五个维度仍都是启发式规则版本，不是最终效果上限
 - skill loader 现在只够支撑 MVP，不够支撑完整治理流程
 - disagreement detection 目前仍是启发式候选机制，不代表最终 debate 效果
+- 当前 selective debate 仍是最小复核版，不代表最终多 reviewer 裁决效果
 
 控制方式：
 

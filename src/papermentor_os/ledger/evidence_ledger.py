@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from papermentor_os.schemas.debate import DebateResolution
 from papermentor_os.schemas.report import DimensionReport, ReviewFinding
 from papermentor_os.schemas.types import Dimension, Severity
 
@@ -22,9 +23,18 @@ DIMENSION_PRIORITY = {
 class EvidenceLedger:
     def __init__(self) -> None:
         self._dimension_reports: dict[Dimension, DimensionReport] = {}
+        self._debate_results: dict[Dimension, DebateResolution] = {}
 
     def record_dimension_report(self, report: DimensionReport) -> None:
         self._dimension_reports[report.dimension] = report
+
+    def record_debate_result(
+        self,
+        resolution: DebateResolution,
+        updated_report: DimensionReport,
+    ) -> None:
+        self._debate_results[resolution.dimension] = resolution
+        self._dimension_reports[resolution.dimension] = updated_report
 
     def get_dimension_reports(self) -> list[DimensionReport]:
         return [
@@ -41,6 +51,15 @@ class EvidenceLedger:
             findings.extend(report.findings)
         return findings
 
+    def get_debate_results(self) -> list[DebateResolution]:
+        return [
+            self._debate_results[dimension]
+            for dimension in sorted(
+                self._debate_results,
+                key=lambda dimension: DIMENSION_PRIORITY[dimension],
+            )
+        ]
+
     def get_findings_by_priority(self, limit: int | None = None) -> list[ReviewFinding]:
         findings = sorted(
             self.get_all_findings(),
@@ -53,4 +72,3 @@ class EvidenceLedger:
         if limit is None:
             return findings
         return findings[:limit]
-

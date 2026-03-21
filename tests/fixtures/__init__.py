@@ -3,6 +3,7 @@
 from tests.fixtures.review_cases import (
     DEBATE_CANDIDATE_CASE,
     MINIMAL_REVIEW_CASE,
+    REVIEW_CASE_CATALOG,
     ReviewCaseSpec,
     SectionSpec,
 )
@@ -11,6 +12,7 @@ from tests.fixtures.sample_docx import build_docx_from_case, build_minimal_revie
 __all__ = [
     "DEBATE_CANDIDATE_CASE",
     "MINIMAL_REVIEW_CASE",
+    "REVIEW_CASE_CATALOG",
     "ReviewCaseSpec",
     "SectionSpec",
     "build_docx_from_case",

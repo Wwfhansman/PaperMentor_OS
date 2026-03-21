@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "required": [
+    "overall_summary",
+    "dimension_reports",
+    "priority_actions",
+    "student_guidance",
+    "advisor_view",
+    "safety_notice"
+  ]
+}
+

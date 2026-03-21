@@ -1,0 +1,10 @@
+id: education-guidance-policy
+name: Education Guidance Policy
+version: 0.1.0
+category: policy
+owner_agent:
+  - TopicScopeAgent
+  - LogicChainAgent
+  - WritingFormatAgent
+status: active
+

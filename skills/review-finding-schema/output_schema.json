@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "required": [
+    "dimension",
+    "issue_title",
+    "severity",
+    "confidence",
+    "evidence_anchor",
+    "diagnosis",
+    "why_it_matters",
+    "next_action",
+    "source_agent",
+    "source_skill_version"
+  ]
+}
+

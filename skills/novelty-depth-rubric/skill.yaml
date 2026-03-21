@@ -1,0 +1,24 @@
+id: novelty-depth-rubric
+name: Novelty And Depth Rubric
+version: 0.1.0
+category: rubric
+owner_agent:
+  - NoveltyDepthAgent
+applicable_disciplines:
+  - computer_science
+applicable_stages:
+  - draft
+  - final_draft
+required_inputs:
+  - title
+  - abstract
+  - sections
+output_schema: dimension-report-schema
+policies:
+  - no-ghostwriting-policy
+  - evidence-required-policy
+quality_gates:
+  - high_severity_recall
+  - report_actionability
+status: active
+

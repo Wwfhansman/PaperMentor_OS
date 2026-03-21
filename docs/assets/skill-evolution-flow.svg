@@ -1,0 +1,116 @@
+<svg width="1600" height="980" viewBox="0 0 1600 980" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font: 700 30px Arial, sans-serif; fill: #1f2937; }
+      .subtitle { font: 400 16px Arial, sans-serif; fill: #4b5563; }
+      .box { fill: #ffffff; stroke: #0f172a; stroke-width: 2; rx: 16; ry: 16; }
+      .blue { fill: #e0f2fe; stroke: #0369a1; stroke-width: 2; rx: 16; ry: 16; }
+      .green { fill: #dcfce7; stroke: #15803d; stroke-width: 2; rx: 16; ry: 16; }
+      .yellow { fill: #fef3c7; stroke: #b45309; stroke-width: 2; rx: 16; ry: 16; }
+      .red { fill: #fee2e2; stroke: #b91c1c; stroke-width: 2; rx: 16; ry: 16; }
+      .purple { fill: #ede9fe; stroke: #6d28d9; stroke-width: 2; rx: 16; ry: 16; }
+      .section { font: 700 18px Arial, sans-serif; fill: #111827; }
+      .small { font: 400 14px Arial, sans-serif; fill: #374151; }
+      .arrow { stroke: #334155; stroke-width: 3; fill: none; marker-end: url(#arrowhead2); }
+      .dashed { stroke-dasharray: 10 8; }
+    </style>
+    <marker id="arrowhead2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <text x="800" y="52" text-anchor="middle" class="title">PaperMentor OS Skill 演进流程图</text>
+  <text x="800" y="82" text-anchor="middle" class="subtitle">版本化能力包 + 运行反馈 + 离线评测 + 发布治理</text>
+
+  <rect x="90" y="120" width="320" height="140" class="blue"/>
+  <text x="250" y="160" text-anchor="middle" class="section">1. Skill 定义</text>
+  <text x="250" y="190" text-anchor="middle" class="small">skill.yaml / rubric.md / prompt.md</text>
+  <text x="250" y="212" text-anchor="middle" class="small">output_schema / examples / eval_cases</text>
+  <text x="250" y="234" text-anchor="middle" class="small">version / owner_agent / policies</text>
+
+  <rect x="500" y="120" width="320" height="140" class="purple"/>
+  <text x="660" y="160" text-anchor="middle" class="section">2. Skill Registry</text>
+  <text x="660" y="190" text-anchor="middle" class="small">统一注册 skill metadata</text>
+  <text x="660" y="212" text-anchor="middle" class="small">按学科、阶段、维度进行路由</text>
+  <text x="660" y="234" text-anchor="middle" class="small">只暴露 active 生产版本</text>
+
+  <rect x="910" y="120" width="320" height="140" class="green"/>
+  <text x="1070" y="160" text-anchor="middle" class="section">3. 线上调用</text>
+  <text x="1070" y="190" text-anchor="middle" class="small">worker 执行 skill bundle</text>
+  <text x="1070" y="212" text-anchor="middle" class="small">生成 findings、分数、置信度</text>
+  <text x="1070" y="234" text-anchor="middle" class="small">保留 source_skill_version</text>
+
+  <rect x="1270" y="120" width="240" height="140" class="yellow"/>
+  <text x="1390" y="160" text-anchor="middle" class="section">4. 运行记录</text>
+  <text x="1390" y="190" text-anchor="middle" class="small">是否被 debate 推翻</text>
+  <text x="1390" y="212" text-anchor="middle" class="small">是否触发 policy 风险</text>
+  <text x="1390" y="234" text-anchor="middle" class="small">人工反馈是否认可</text>
+
+  <line x1="410" y1="190" x2="500" y2="190" class="arrow"/>
+  <line x1="820" y1="190" x2="910" y2="190" class="arrow"/>
+  <line x1="1230" y1="190" x2="1270" y2="190" class="arrow"/>
+
+  <rect x="1210" y="340" width="300" height="150" class="red"/>
+  <text x="1360" y="380" text-anchor="middle" class="section">5. 问题发现</text>
+  <text x="1360" y="410" text-anchor="middle" class="small">误判创新性</text>
+  <text x="1360" y="432" text-anchor="middle" class="small">建议过空泛</text>
+  <text x="1360" y="454" text-anchor="middle" class="small">证据锚点不足</text>
+
+  <line x1="1390" y1="260" x2="1360" y2="340" class="arrow"/>
+
+  <rect x="820" y="350" width="320" height="130" class="box"/>
+  <text x="980" y="390" text-anchor="middle" class="section">6. 生成新版本 Skill</text>
+  <text x="980" y="420" text-anchor="middle" class="small">例如 v1.0.0 -&gt; v1.1.0</text>
+  <text x="980" y="442" text-anchor="middle" class="small">调整 rubric、prompt、examples、policies</text>
+
+  <line x1="1210" y1="415" x2="1140" y2="415" class="arrow"/>
+
+  <rect x="420" y="340" width="320" height="150" class="blue"/>
+  <text x="580" y="380" text-anchor="middle" class="section">7. 离线评测</text>
+  <text x="580" y="410" text-anchor="middle" class="small">固定 benchmark 样本集</text>
+  <text x="580" y="432" text-anchor="middle" class="small">比召回率、可操作性、稳定性</text>
+  <text x="580" y="454" text-anchor="middle" class="small">检查 policy violation rate</text>
+
+  <line x1="820" y1="415" x2="740" y2="415" class="arrow"/>
+
+  <rect x="80" y="340" width="260" height="150" class="yellow"/>
+  <text x="210" y="380" text-anchor="middle" class="section">8. 评测结论</text>
+  <text x="210" y="410" text-anchor="middle" class="small">是否优于旧版本</text>
+  <text x="210" y="432" text-anchor="middle" class="small">是否更稳定</text>
+  <text x="210" y="454" text-anchor="middle" class="small">是否更符合 policy</text>
+
+  <line x1="420" y1="415" x2="340" y2="415" class="arrow"/>
+
+  <rect x="80" y="610" width="260" height="140" class="red"/>
+  <text x="210" y="650" text-anchor="middle" class="section">9A. 不达标</text>
+  <text x="210" y="680" text-anchor="middle" class="small">继续调整</text>
+  <text x="210" y="702" text-anchor="middle" class="small">不能直接替换生产版本</text>
+
+  <rect x="420" y="600" width="320" height="160" class="green"/>
+  <text x="580" y="640" text-anchor="middle" class="section">9B. 达标发布</text>
+  <text x="580" y="670" text-anchor="middle" class="small">reviewer approval</text>
+  <text x="580" y="692" text-anchor="middle" class="small">切换 active version</text>
+  <text x="580" y="714" text-anchor="middle" class="small">旧版本保留用于回滚和对比</text>
+
+  <line x1="210" y1="490" x2="210" y2="610" class="arrow"/>
+  <line x1="300" y1="490" x2="500" y2="600" class="arrow"/>
+
+  <rect x="850" y="610" width="320" height="140" class="purple"/>
+  <text x="1010" y="650" text-anchor="middle" class="section">10. 新版本进入生产</text>
+  <text x="1010" y="680" text-anchor="middle" class="small">Skill Registry 更新 active 版本</text>
+  <text x="1010" y="702" text-anchor="middle" class="small">后续线上调用继续沉淀反馈</text>
+
+  <line x1="740" y1="680" x2="850" y2="680" class="arrow"/>
+
+  <rect x="1220" y="610" width="290" height="140" class="box"/>
+  <text x="1365" y="650" text-anchor="middle" class="section">11. 闭环演进</text>
+  <text x="1365" y="680" text-anchor="middle" class="small">运行反馈 -&gt; 版本优化 -&gt; 评测发布</text>
+  <text x="1365" y="702" text-anchor="middle" class="small">不是自动乱进化，而是受控升级</text>
+
+  <line x1="1170" y1="680" x2="1220" y2="680" class="arrow"/>
+  <line x1="1365" y1="610" x2="1365" y2="490" class="arrow dashed"/>
+
+  <rect x="260" y="830" width="1080" height="90" class="yellow"/>
+  <text x="800" y="865" text-anchor="middle" class="section">核心产品逻辑</text>
+  <text x="800" y="892" text-anchor="middle" class="small">Skill 不是“自己随便进化”，而是通过运行反馈、离线 benchmark、版本治理和人工确认进行受控演进</text>
+</svg>

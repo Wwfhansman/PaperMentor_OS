@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "required": [
+    "dimension",
+    "score",
+    "summary",
+    "findings",
+    "debate_used"
+  ]
+}
+

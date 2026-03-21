@@ -1,0 +1,23 @@
+id: writing-format-rubric
+name: Writing And Format Rubric
+version: 0.1.0
+category: rubric
+owner_agent:
+  - WritingFormatAgent
+applicable_disciplines:
+  - computer_science
+applicable_stages:
+  - draft
+  - final_draft
+required_inputs:
+  - abstract
+  - sections
+  - references
+output_schema: dimension-report-schema
+policies:
+  - no-ghostwriting-policy
+  - education-guidance-policy
+quality_gates:
+  - report_actionability
+status: active
+

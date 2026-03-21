@@ -1,0 +1,15 @@
+id: computer-science-thesis-rules
+name: Computer Science Thesis Rules
+version: 0.1.0
+category: domain_adaptation
+owner_agent:
+  - TopicScopeAgent
+  - LogicChainAgent
+  - WritingFormatAgent
+applicable_disciplines:
+  - computer_science
+applicable_stages:
+  - draft
+  - final_draft
+status: active
+

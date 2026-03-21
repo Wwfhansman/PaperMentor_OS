@@ -1,0 +1,10 @@
+id: evidence-required-policy
+name: Evidence Required Policy
+version: 0.1.0
+category: policy
+owner_agent:
+  - TopicScopeAgent
+  - LogicChainAgent
+  - WritingFormatAgent
+status: active
+

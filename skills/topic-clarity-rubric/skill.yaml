@@ -1,0 +1,23 @@
+id: topic-clarity-rubric
+name: Topic Clarity Rubric
+version: 0.1.0
+category: rubric
+owner_agent:
+  - TopicScopeAgent
+applicable_disciplines:
+  - computer_science
+applicable_stages:
+  - draft
+  - final_draft
+required_inputs:
+  - title
+  - abstract
+  - sections
+output_schema: review-finding-schema
+policies:
+  - no-ghostwriting-policy
+  - evidence-required-policy
+quality_gates:
+  - high_severity_recall
+status: active
+

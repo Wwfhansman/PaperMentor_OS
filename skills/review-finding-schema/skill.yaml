@@ -1,0 +1,10 @@
+id: review-finding-schema
+name: Review Finding Schema
+version: 0.1.0
+category: output_schema
+owner_agent:
+  - TopicScopeAgent
+  - LogicChainAgent
+  - WritingFormatAgent
+status: active
+

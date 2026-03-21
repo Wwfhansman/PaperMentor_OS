@@ -1,0 +1,22 @@
+id: logic-chain-rubric
+name: Logic Chain Rubric
+version: 0.1.0
+category: rubric
+owner_agent:
+  - LogicChainAgent
+applicable_disciplines:
+  - computer_science
+applicable_stages:
+  - draft
+  - final_draft
+required_inputs:
+  - sections
+  - references
+output_schema: dimension-report-schema
+policies:
+  - no-ghostwriting-policy
+  - evidence-required-policy
+quality_gates:
+  - evidence_anchor_validity
+status: active
+

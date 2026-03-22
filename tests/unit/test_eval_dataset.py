@@ -14,6 +14,46 @@ def test_load_benchmark_cases_filters_by_tag() -> None:
     cases = load_benchmark_cases(tag="evaluation_fixture")
 
     case_ids = {case.case_id for case in cases}
+    assert "abstract_running_header_variation_case" in case_ids
+    assert "bilingual_abstract_case" in case_ids
+    assert "annotation_block_variation_case" in case_ids
+    assert "back_matter_variation_case" in case_ids
+    assert "caption_variation_case" in case_ids
+    assert "footer_footnote_noise_variation_case" in case_ids
+    assert "equation_caption_variation_case" in case_ids
+    assert "footnote_body_variation_case" in case_ids
+    assert "docx_footnote_object_variation_case" in case_ids
+    assert "docx_endnote_object_variation_case" in case_ids
+    assert "mixed_note_object_variation_case" in case_ids
+    assert "multiline_note_object_variation_case" in case_ids
+    assert "table_adjacent_note_object_variation_case" in case_ids
+    assert "running_header_footer_metadata_case" in case_ids
+    assert "running_english_header_footer_case" in case_ids
+    assert "repeated_section_header_noise_case" in case_ids
+    assert "repeated_parent_section_header_noise_case" in case_ids
+    assert "repeated_subsection_header_noise_case" in case_ids
+    assert "abbreviated_section_header_noise_case" in case_ids
+    assert "unnumbered_abbreviated_section_header_noise_case" in case_ids
+    assert "complex_contents_variation_case" in case_ids
+    assert "contents_header_footer_variation_case" in case_ids
+    assert "contents_field_code_variation_case" in case_ids
+    assert "cover_page_table_variation_case" in case_ids
+    assert "declaration_variation_case" in case_ids
+    assert "post_reference_bio_variation_case" in case_ids
+    assert "front_matter_combo_variation_case" in case_ids
+    assert "front_matter_multiline_variation_case" in case_ids
+    assert "front_matter_spacing_variation_case" in case_ids
+    assert "front_matter_table_variation_case" in case_ids
+    assert "docx_table_front_matter_case" in case_ids
+    assert "complex_table_front_matter_case" in case_ids
+    assert "appendix_contents_variation_case" in case_ids
+    assert "appendix_figure_list_variation_case" in case_ids
+    assert "keyword_variation_case" in case_ids
+    assert "metadata_block_variation_case" in case_ids
+    assert "author_info_variation_case" in case_ids
+    assert "appendix_variation_case" in case_ids
+    assert "english_appendix_variation_case" in case_ids
+    assert "department_info_variation_case" in case_ids
     assert "strong_review_case" in case_ids
     assert "weak_review_case" in case_ids
     assert "boundary_review_case" in case_ids

@@ -11,6 +11,7 @@ NOVELTY_HINTS = ("创新", "novel", "new", "改进", "提出", "贡献")
 LIMITATION_HINTS = ("局限", "不足", "future work", "后续工作")
 DEPTH_HINTS = ("实验", "评估", "分析", "对比", "消融", "ablation")
 SYSTEM_ONLY_HINTS = ("设计与实现", "系统实现", "系统设计", "平台搭建")
+CONTRIBUTION_COMPARISON_HINTS = ("相较", "相对于", "优于", "区别于", "差异", "定位", "相比")
 
 
 class NoveltyDepthAgent(BaseReviewAgent):
@@ -29,8 +30,12 @@ class NoveltyDepthAgent(BaseReviewAgent):
         has_depth_signals = self._contains_any(combined_text, DEPTH_HINTS)
         has_limitations = self._contains_any(combined_text, LIMITATION_HINTS)
         system_only_title = self._contains_any(paper.title, SYSTEM_ONLY_HINTS)
+        expresses_comparative_contribution = self._contains_any(combined_text, CONTRIBUTION_COMPARISON_HINTS)
+        has_contribution_expression = mentions_novelty or (
+            expresses_comparative_contribution and has_depth_signals
+        )
 
-        if not mentions_novelty:
+        if not has_contribution_expression:
             findings.append(
                 self._finding(
                     skill_version=skill_version,
@@ -64,7 +69,7 @@ class NoveltyDepthAgent(BaseReviewAgent):
                 )
             )
 
-        if mentions_novelty and not has_depth_signals:
+        if has_contribution_expression and not has_depth_signals:
             findings.append(
                 self._finding(
                     skill_version=skill_version,

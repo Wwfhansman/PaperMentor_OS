@@ -8,9 +8,10 @@ from papermentor_os.skills.loader import SkillBundle
 
 
 EXPERIMENT_HINTS = ("实验", "评估", "测试", "evaluation", "experiment", "结果分析")
-CONCLUSION_HINTS = ("结论", "总结", "conclusion")
+CONCLUSION_HINTS = ("结论", "总结", "conclusion", "展望", "结语", "讨论")
 CLAIM_HINTS = ("提升", "优化", "有效", "显著", "优于", "改善")
 EVIDENCE_HINTS = ("实验", "数据", "结果", "表", "图", "[")
+CLOSING_SUMMARY_HINTS = ("综上", "本文工作表明", "局限性", "后续工作", "未来工作")
 
 
 class LogicChainAgent(BaseReviewAgent):
@@ -28,7 +29,10 @@ class LogicChainAgent(BaseReviewAgent):
             body_text,
             EXPERIMENT_HINTS,
         )
-        has_conclusion = self._contains_any(heading_text, CONCLUSION_HINTS)
+        has_conclusion = self._contains_any(heading_text, CONCLUSION_HINTS) or self._contains_any(
+            body_text[-600:],
+            CLOSING_SUMMARY_HINTS,
+        )
         has_claim = self._contains_any(body_text, CLAIM_HINTS)
         has_evidence = self._contains_any(body_text, EVIDENCE_HINTS)
 

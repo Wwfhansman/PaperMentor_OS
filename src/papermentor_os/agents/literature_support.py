@@ -10,7 +10,16 @@ from papermentor_os.skills.loader import SkillBundle
 
 
 CITATION_PATTERN = re.compile(r"\[(\d+)\]|（[^）]*\d{4}[^）]*）|\([^)]*\d{4}[^)]*\)")
-RELATED_WORK_HINTS = ("相关工作", "文献综述", "研究现状", "related work", "literature review")
+RELATED_WORK_HINTS = (
+    "相关工作",
+    "文献综述",
+    "研究现状",
+    "related work",
+    "literature review",
+    "已有方法",
+    "方法比较",
+    "对比分析",
+)
 BASELINE_HINTS = ("baseline", "对比", "比较", "benchmark", "sota")
 
 

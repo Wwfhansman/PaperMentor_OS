@@ -6,6 +6,10 @@ from papermentor_os.schemas.report import DimensionReport, EvidenceAnchor, Revie
 from papermentor_os.schemas.types import Dimension, Severity
 from papermentor_os.skills.loader import SkillBundle
 
+PROBLEM_HINTS = ("问题", "目标", "本文", "提出", "研究")
+METHOD_HINTS = ("设计", "实现", "算法", "模型", "框架", "构建", "分析")
+RESULT_HINTS = ("结果", "验证", "评估", "性能", "效果", "稳定性")
+
 
 class WritingFormatAgent(BaseReviewAgent):
     agent_name = "WritingFormatAgent"
@@ -33,7 +37,13 @@ class WritingFormatAgent(BaseReviewAgent):
             )
 
         abstract_length = len(paper.abstract.replace(" ", ""))
-        if abstract_length < 120:
+        has_problem_signal = self._contains_any(paper.abstract, PROBLEM_HINTS)
+        has_method_signal = self._contains_any(paper.abstract, METHOD_HINTS)
+        has_result_signal = self._contains_any(paper.abstract, RESULT_HINTS)
+        abstract_is_compact_but_complete = (
+            abstract_length >= 50 and has_problem_signal and has_method_signal and has_result_signal
+        )
+        if abstract_length < 120 and not abstract_is_compact_but_complete:
             findings.append(
                 self._finding(
                     skill_version=skill_version,
@@ -112,6 +122,9 @@ class WritingFormatAgent(BaseReviewAgent):
         if not paragraphs:
             return None
         return max(paragraphs, key=lambda paragraph: len(paragraph.text))
+
+    def _contains_any(self, text: str, hints: tuple[str, ...]) -> bool:
+        return any(hint in text for hint in hints)
 
     def _finding(
         self,

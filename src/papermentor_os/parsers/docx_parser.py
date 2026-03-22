@@ -14,6 +14,13 @@ HEADING_STYLE_PATTERN = re.compile(r"heading\s*(\d+)", re.IGNORECASE)
 NUMBERED_HEADING_PATTERN = re.compile(r"^\d+(?:\.\d+)*\s+")
 ABSTRACT_TITLES = {"摘要", "abstract"}
 REFERENCE_TITLES = {"参考文献", "references", "bibliography"}
+CONTENTS_TITLES = {"目录", "contents", "tableofcontents"}
+TITLE_STYLE_HINTS = {"title", "标题", "论文题目"}
+COVER_PAGE_HINTS = {"大学", "学院", "专业", "指导教师", "学号", "姓名", "班级"}
+TITLE_KEYWORDS = {"评审", "论文", "研究", "设计", "实现", "框架", "分析", "系统", "方法", "适配"}
+TOC_ENTRY_PATTERN = re.compile(
+    r"^(?:第[一二三四五六七八九十百]+章|[一二三四五六七八九十]+、|\d+(?:\.\d+)*\s+).*(?:\.{2,}|\u2026{2,}|\s)\d+$"
+)
 
 
 class DocxPaperParser:
@@ -42,8 +49,9 @@ class DocxPaperParser:
         if not paragraphs:
             raise ValueError("The docx file does not contain readable paragraphs.")
 
-        title = paragraphs[0]["text"]
-        body_items = paragraphs[1:]
+        title_index = self._select_title_index(paragraphs)
+        title = paragraphs[title_index]["text"]
+        body_items = paragraphs[title_index + 1:]
 
         abstract_lines: list[str] = []
         sections: list[Section] = []
@@ -58,14 +66,21 @@ class DocxPaperParser:
         for item in body_items:
             text = item["text"]
             heading_level = self._heading_level(text, item["style"])
-            lowered = text.lower()
+            normalized_heading = self._canonical_heading_label(text)
+
+            if mode == "contents" and self._is_table_of_contents_entry(text):
+                continue
 
             if heading_level is not None:
-                if lowered in ABSTRACT_TITLES:
+                if normalized_heading in ABSTRACT_TITLES:
                     mode = "abstract"
                     current_section = None
                     continue
-                if lowered in REFERENCE_TITLES:
+                if normalized_heading in CONTENTS_TITLES:
+                    mode = "contents"
+                    current_section = None
+                    continue
+                if normalized_heading in REFERENCE_TITLES:
                     mode = "references"
                     current_section = None
                     continue
@@ -127,6 +142,7 @@ class DocxPaperParser:
         )
 
     def _heading_level(self, text: str, style_name: str) -> int | None:
+        normalized_heading = self._canonical_heading_label(text)
         if style_name:
             matched = HEADING_STYLE_PATTERN.search(style_name)
             if matched:
@@ -134,7 +150,7 @@ class DocxPaperParser:
             if style_name in {"标题 1", "标题 2", "标题 3"}:
                 return int(style_name.split()[-1])
 
-        if text in ABSTRACT_TITLES | REFERENCE_TITLES:
+        if normalized_heading in ABSTRACT_TITLES | REFERENCE_TITLES:
             return 1
 
         if NUMBERED_HEADING_PATTERN.match(text):
@@ -145,3 +161,45 @@ class DocxPaperParser:
 
         return None
 
+    def _canonical_heading_label(self, text: str) -> str:
+        return re.sub(r"\s+", "", text).lower()
+
+    def _is_table_of_contents_entry(self, text: str) -> bool:
+        normalized = normalize_whitespace(text)
+        return bool(TOC_ENTRY_PATTERN.match(normalized))
+
+    def _select_title_index(self, paragraphs: list[dict[str, str]]) -> int:
+        abstract_index = next(
+            (
+                index
+                for index, item in enumerate(paragraphs)
+                if self._canonical_heading_label(item["text"]) in ABSTRACT_TITLES
+            ),
+            len(paragraphs),
+        )
+        candidate_range = paragraphs[:abstract_index] or paragraphs[:1]
+
+        scored_candidates: list[tuple[int, int]] = []
+        for index, item in enumerate(candidate_range):
+            text = item["text"]
+            style_name = item["style"]
+            score = 0
+            canonical_style = style_name.lower()
+            if any(hint in canonical_style for hint in TITLE_STYLE_HINTS):
+                score += 6
+            if any(keyword in text for keyword in TITLE_KEYWORDS):
+                score += 2
+            if 8 <= len(text) <= 40:
+                score += 2
+            if len(text) > 45:
+                score -= 2
+            if any(hint in text for hint in COVER_PAGE_HINTS):
+                score -= 4
+            if self._canonical_heading_label(text) in ABSTRACT_TITLES | REFERENCE_TITLES:
+                score -= 10
+            scored_candidates.append((score, index))
+
+        best_score, best_index = max(scored_candidates, key=lambda item: (item[0], -item[1]))
+        if best_score <= 0:
+            return 0
+        return best_index

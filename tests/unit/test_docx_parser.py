@@ -4,6 +4,8 @@ from docx import Document
 
 from papermentor_os.parsers.docx_parser import DocxPaperParser
 from papermentor_os.schemas.types import Discipline, PaperStage
+from tests.fixtures.review_cases import CONTENTS_VARIATION_CASE, COVER_PAGE_VARIATION_CASE, TEMPLATE_VARIATION_CASE
+from tests.fixtures.sample_docx import build_docx_from_case
 
 
 def test_docx_parser_extracts_title_abstract_sections_and_references(tmp_path: Path) -> None:
@@ -34,3 +36,52 @@ def test_docx_parser_extracts_title_abstract_sections_and_references(tmp_path: P
     assert paper.sections[0].paragraphs[0].anchor_id == "sec-001-p-001"
     assert len(paper.references) == 1
 
+
+def test_docx_parser_handles_spaced_abstract_and_reference_titles(tmp_path: Path) -> None:
+    file_path = tmp_path / "template_variation.docx"
+    build_docx_from_case(file_path, TEMPLATE_VARIATION_CASE)
+
+    parser = DocxPaperParser()
+    paper = parser.parse_file(
+        file_path,
+        stage=PaperStage.DRAFT,
+        discipline=Discipline.COMPUTER_SCIENCE,
+    )
+
+    assert "模板差异适配问题" in paper.abstract
+    assert paper.sections[0].heading == "第一章 绪论"
+    assert len(paper.references) == 6
+
+
+def test_docx_parser_handles_cover_page_content_before_title(tmp_path: Path) -> None:
+    file_path = tmp_path / "cover_page_variation.docx"
+    build_docx_from_case(file_path, COVER_PAGE_VARIATION_CASE)
+
+    parser = DocxPaperParser()
+    paper = parser.parse_file(
+        file_path,
+        stage=PaperStage.DRAFT,
+        discipline=Discipline.COMPUTER_SCIENCE,
+    )
+
+    assert paper.title == COVER_PAGE_VARIATION_CASE.title
+    assert "封面与标题布局方式" in paper.abstract
+    assert paper.sections[0].heading == "1 绪论"
+
+
+def test_docx_parser_ignores_table_of_contents_entries_between_abstract_and_body(tmp_path: Path) -> None:
+    file_path = tmp_path / "contents_variation.docx"
+    build_docx_from_case(file_path, CONTENTS_VARIATION_CASE)
+
+    parser = DocxPaperParser()
+    paper = parser.parse_file(
+        file_path,
+        stage=PaperStage.DRAFT,
+        discipline=Discipline.COMPUTER_SCIENCE,
+    )
+
+    headings = [section.heading for section in paper.sections]
+
+    assert "目录" not in headings
+    assert headings[0] == "第一章 绪论"
+    assert len(paper.sections) == 5

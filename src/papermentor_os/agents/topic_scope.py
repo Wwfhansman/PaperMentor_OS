@@ -9,6 +9,24 @@ from papermentor_os.skills.loader import SkillBundle
 
 
 GENERIC_TITLE_HINTS = ("系统", "研究", "设计", "实现", "分析", "探索")
+SPECIFIC_SCOPE_HINTS = (
+    "面向",
+    "针对",
+    "基于",
+    "多智能体",
+    "本科论文",
+    "毕业论文",
+    "初审",
+    "评审",
+    "反馈",
+    "计算机专业",
+    "框架",
+    "方法",
+    "检测",
+    "推荐",
+    "模板",
+    "适配",
+)
 PROBLEM_HINTS = ("问题", "目标", "本文", "提出", "解决", "研究")
 METHOD_HINTS = ("设计", "实现", "算法", "模型", "实验", "框架")
 RESULT_HINTS = ("结果", "验证", "评估", "性能", "效果")
@@ -78,7 +96,7 @@ class TopicScopeAgent(BaseReviewAgent):
                 )
 
         overlap = keyword_overlap(paper.title, abstract)
-        if abstract and overlap < 0.15:
+        if abstract and overlap < 0.15 and not self._title_and_abstract_share_specific_scope(paper.title, abstract):
             findings.append(
                 self._finding(
                     skill_version=skill_version,
@@ -96,7 +114,8 @@ class TopicScopeAgent(BaseReviewAgent):
             )
 
         generic_hint_count = sum(1 for token in GENERIC_TITLE_HINTS if token in paper.title)
-        if generic_hint_count >= 2:
+        has_specific_scope = self._contains_any(paper.title, SPECIFIC_SCOPE_HINTS)
+        if generic_hint_count >= 2 and not has_specific_scope:
             findings.append(
                 self._finding(
                     skill_version=skill_version,
@@ -154,6 +173,13 @@ class TopicScopeAgent(BaseReviewAgent):
 
     def _contains_any(self, text: str, hints: tuple[str, ...]) -> bool:
         return any(hint in text for hint in hints)
+
+    def _title_and_abstract_share_specific_scope(self, title: str, abstract: str) -> bool:
+        title_hints = {hint for hint in SPECIFIC_SCOPE_HINTS if hint in title}
+        if not title_hints:
+            return False
+        abstract_hints = {hint for hint in title_hints if hint in abstract}
+        return len(abstract_hints) >= 2
 
     def _finding(
         self,

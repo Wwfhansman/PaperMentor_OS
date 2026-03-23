@@ -1,4 +1,5 @@
 import importlib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 import time
@@ -328,7 +329,7 @@ def test_async_review_run_claim_endpoint_claims_stale_foreign_lease(
         time.sleep(0.35)
         return original_review_paper(self, *args, **kwargs)
 
-    def _no_lease_renewal(self, run_id, ownership_epoch, stop_event):
+    def _no_lease_renewal(self, run_id, ownership_epoch, ownership_token, stop_event):
         stop_event.wait(timeout=1.0)
 
     monkeypatch.setattr(chief_module.ChiefReviewer, "review_paper", _slow_review_paper)
@@ -415,10 +416,14 @@ def test_async_review_run_claim_cancels_previous_owner_locally(
             time.sleep(0.02)
         return original_execute_worker_review(self, worker_agent, paper, skill_context=skill_context)
 
-    def _observe_claim_then_stop(self, run_id, ownership_epoch, stop_event):
+    def _observe_claim_then_stop(self, run_id, ownership_epoch, ownership_token, stop_event):
         if stop_event.wait(timeout=0.35):
             return
-        self._heartbeat_run_lease(run_id, ownership_epoch=ownership_epoch)
+        self._heartbeat_run_lease(
+            run_id,
+            ownership_epoch=ownership_epoch,
+            ownership_token=ownership_token,
+        )
         stop_event.wait(timeout=1.0)
 
     monkeypatch.setattr(
@@ -483,6 +488,15 @@ def test_async_review_run_claim_endpoint_can_skip_auto_resume_for_request_scoped
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    for env_name in (
+        "PAPERMENTOR_OS_SERVER_LLM_PROVIDER_ID",
+        "PAPERMENTOR_OS_SERVER_LLM_BASE_URL",
+        "PAPERMENTOR_OS_SERVER_LLM_API_KEY",
+        "PAPERMENTOR_OS_SERVER_LLM_MODEL_NAME",
+        "PAPERMENTOR_OS_SERVER_LLM_REVIEW_BACKEND",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
     file_path = tmp_path / "async-claim-no-auto-resume.docx"
     build_docx_from_case(file_path, STRONG_REVIEW_CASE)
     snapshot_dir = tmp_path / "run-snapshots"
@@ -494,7 +508,7 @@ def test_async_review_run_claim_endpoint_can_skip_auto_resume_for_request_scoped
         time.sleep(0.35)
         return original_review_paper(self, *args, **kwargs)
 
-    def _no_lease_renewal(self, run_id, ownership_epoch, stop_event):
+    def _no_lease_renewal(self, run_id, ownership_epoch, ownership_token, stop_event):
         stop_event.wait(timeout=1.0)
 
     monkeypatch.setattr(chief_module.ChiefReviewer, "review_paper", _slow_review_paper)
@@ -539,6 +553,253 @@ def test_async_review_run_claim_endpoint_can_skip_auto_resume_for_request_scoped
     assert claim_payload["claimed"] is True
     assert claim_payload["resume_started"] is False
     assert claim_payload["resume_reason"] == "request_scoped_api_key_not_persisted"
+
+
+def test_async_review_run_claim_endpoint_can_auto_resume_request_scoped_key_with_server_llm_config(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    file_path = tmp_path / "async-claim-server-resume.docx"
+    build_docx_from_case(file_path, STRONG_REVIEW_CASE)
+    snapshot_dir = tmp_path / "run-snapshots"
+    chief_module = importlib.import_module("papermentor_os.orchestrator.chief_reviewer")
+    registry_module = importlib.import_module("papermentor_os.api.run_registry")
+    app_module = importlib.import_module("papermentor_os.api.app")
+    original_review_paper = chief_module.ChiefReviewer.review_paper
+    original_build_chief_reviewer = app_module.build_chief_reviewer
+
+    def _slow_review_paper(self, *args, **kwargs):
+        time.sleep(0.35)
+        return original_review_paper(self, *args, **kwargs)
+
+    def _no_lease_renewal(self, run_id, ownership_epoch, ownership_token, stop_event):
+        stop_event.wait(timeout=1.0)
+
+    def _rule_only_builder(llm_config=None, **kwargs):
+        return original_build_chief_reviewer(
+            ReviewLLMConfig(review_backend=ReviewBackend.RULE_ONLY),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(chief_module.ChiefReviewer, "review_paper", _slow_review_paper)
+    monkeypatch.setattr(
+        registry_module.InMemoryReviewRunRegistry,
+        "_renew_run_lease_until_stopped",
+        _no_lease_renewal,
+    )
+    monkeypatch.setattr(app_module, "build_chief_reviewer", _rule_only_builder)
+
+    server_llm_config = ReviewLLMConfig(
+        review_backend=ReviewBackend.MODEL_WITH_FALLBACK,
+        base_url="https://server.example.com/v1",
+        api_key="sk-server",
+        model_name="server-model",
+    )
+
+    primary_client = TestClient(
+        create_app(
+            run_snapshot_dir=snapshot_dir,
+            run_instance_id="primary-instance",
+            run_lease_seconds=0.15,
+            server_llm_config=server_llm_config,
+        )
+    )
+    secondary_client = TestClient(
+        create_app(
+            run_snapshot_dir=snapshot_dir,
+            run_instance_id="secondary-instance",
+            run_lease_seconds=0.3,
+            server_llm_config=server_llm_config,
+        )
+    )
+
+    accepted = primary_client.post(
+        "/review/docx/async",
+        json={
+            "file_path": str(file_path),
+            "llm": ReviewLLMConfig(
+                review_backend=ReviewBackend.MODEL_WITH_FALLBACK,
+                base_url="https://request.example.com/v1",
+                api_key="sk-request",
+                model_name="request-model",
+            ).model_dump(mode="json"),
+        },
+    ).json()
+    time.sleep(0.22)
+
+    claim_response = secondary_client.post(f"/review/runs/{accepted['run_id']}/claim")
+    assert claim_response.status_code == 200
+    claim_payload = claim_response.json()
+    assert claim_payload["claimed"] is True
+    assert claim_payload["resume_started"] is True
+    assert claim_payload["resume_reason"] == "resumed_from_source_with_checkpoint"
+    assert claim_payload["ownership"]["owner_instance_id"] == "secondary-instance"
+
+    completed = _poll_run_completion(secondary_client, accepted["run_id"], timeout_seconds=4.0)
+    assert completed["run"]["state"] == "completed"
+    assert completed["ownership"]["owner_instance_id"] == "secondary-instance"
+    assert completed["ownership"]["lease_active"] is False
+
+    events = secondary_client.get(f"/review/runs/{accepted['run_id']}/events").json()["events"]
+    assert any(event["event_type"] == "ownership_claimed" for event in events)
+    assert any(event["event_type"] == "resumed_completed" for event in events)
+
+
+def test_async_review_run_claim_endpoint_allows_only_one_concurrent_winner(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    file_path = tmp_path / "async-claim-concurrent.docx"
+    build_docx_from_case(file_path, STRONG_REVIEW_CASE)
+    snapshot_dir = tmp_path / "run-snapshots"
+    chief_module = importlib.import_module("papermentor_os.orchestrator.chief_reviewer")
+    registry_module = importlib.import_module("papermentor_os.api.run_registry")
+    original_review_paper = chief_module.ChiefReviewer.review_paper
+
+    def _slow_review_paper(self, *args, **kwargs):
+        time.sleep(0.35)
+        return original_review_paper(self, *args, **kwargs)
+
+    def _no_lease_renewal(self, run_id, ownership_epoch, ownership_token, stop_event):
+        stop_event.wait(timeout=1.0)
+
+    monkeypatch.setattr(chief_module.ChiefReviewer, "review_paper", _slow_review_paper)
+    monkeypatch.setattr(
+        registry_module.InMemoryReviewRunRegistry,
+        "_renew_run_lease_until_stopped",
+        _no_lease_renewal,
+    )
+
+    primary_client = TestClient(
+        create_app(
+            run_snapshot_dir=snapshot_dir,
+            run_instance_id="primary-instance",
+            run_lease_seconds=0.15,
+        )
+    )
+    secondary_client = TestClient(
+        create_app(
+            run_snapshot_dir=snapshot_dir,
+            run_instance_id="secondary-instance",
+            run_lease_seconds=0.3,
+        )
+    )
+    tertiary_client = TestClient(
+        create_app(
+            run_snapshot_dir=snapshot_dir,
+            run_instance_id="tertiary-instance",
+            run_lease_seconds=0.3,
+        )
+    )
+
+    accepted = primary_client.post(
+        "/review/docx/async",
+        json={"file_path": str(file_path)},
+    ).json()
+    time.sleep(0.22)
+
+    def _claim(client: TestClient):
+        return client.post(f"/review/runs/{accepted['run_id']}/claim")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        secondary_future = executor.submit(_claim, secondary_client)
+        tertiary_future = executor.submit(_claim, tertiary_client)
+        responses = [secondary_future.result(timeout=2.0), tertiary_future.result(timeout=2.0)]
+
+    status_codes = sorted(response.status_code for response in responses)
+    assert status_codes == [200, 409]
+
+    winning_response = next(response for response in responses if response.status_code == 200)
+    winning_payload = winning_response.json()
+    assert winning_payload["claimed"] is True
+    assert winning_payload["resume_started"] is True
+    assert winning_payload["ownership"]["owner_instance_id"] in {"secondary-instance", "tertiary-instance"}
+
+    losing_response = next(response for response in responses if response.status_code == 409)
+    assert losing_response.json()["detail"]["code"] == "active_foreign_lease"
+
+    winning_client = (
+        secondary_client
+        if winning_payload["ownership"]["owner_instance_id"] == "secondary-instance"
+        else tertiary_client
+    )
+    completed = _poll_run_completion(winning_client, accepted["run_id"], timeout_seconds=4.0)
+    assert completed["run"]["state"] == "completed"
+
+
+def test_async_review_run_claim_auto_resume_builder_failure_marks_run_failed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    file_path = tmp_path / "async-claim-builder-failure.docx"
+    build_docx_from_case(file_path, STRONG_REVIEW_CASE)
+    snapshot_dir = tmp_path / "run-snapshots"
+    chief_module = importlib.import_module("papermentor_os.orchestrator.chief_reviewer")
+    registry_module = importlib.import_module("papermentor_os.api.run_registry")
+    app_module = importlib.import_module("papermentor_os.api.app")
+    original_review_paper = chief_module.ChiefReviewer.review_paper
+
+    def _slow_review_paper(self, *args, **kwargs):
+        time.sleep(0.35)
+        return original_review_paper(self, *args, **kwargs)
+
+    def _no_lease_renewal(self, run_id, ownership_epoch, ownership_token, stop_event):
+        stop_event.wait(timeout=1.0)
+
+    monkeypatch.setattr(chief_module.ChiefReviewer, "review_paper", _slow_review_paper)
+    monkeypatch.setattr(
+        registry_module.InMemoryReviewRunRegistry,
+        "_renew_run_lease_until_stopped",
+        _no_lease_renewal,
+    )
+
+    primary_client = TestClient(
+        create_app(
+            run_snapshot_dir=snapshot_dir,
+            run_instance_id="primary-instance",
+            run_lease_seconds=0.15,
+        )
+    )
+
+    accepted = primary_client.post(
+        "/review/docx/async",
+        json={"file_path": str(file_path)},
+    ).json()
+    time.sleep(0.22)
+
+    monkeypatch.setattr(
+        app_module,
+        "build_chief_reviewer",
+        lambda llm_config=None, **kwargs: (_ for _ in ()).throw(RuntimeError("resume builder failed")),
+    )
+
+    secondary_client = TestClient(
+        create_app(
+            run_snapshot_dir=snapshot_dir,
+            run_instance_id="secondary-instance",
+            run_lease_seconds=0.3,
+        )
+    )
+
+    claim_response = secondary_client.post(f"/review/runs/{accepted['run_id']}/claim")
+    assert claim_response.status_code == 200
+    claim_payload = claim_response.json()
+    assert claim_payload["claimed"] is True
+    assert claim_payload["resume_started"] is True
+
+    failed = _poll_run_completion(secondary_client, accepted["run_id"], timeout_seconds=4.0)
+    assert failed["run"]["state"] == "failed"
+    assert failed["ownership"]["owner_instance_id"] == "secondary-instance"
+    assert failed["ownership"]["lease_active"] is False
+    assert failed["error"] == {
+        "code": "internal_server_error",
+        "message": "review run failed unexpectedly.",
+        "retryable": False,
+    }
+
+    events = secondary_client.get(f"/review/runs/{accepted['run_id']}/events").json()["events"]
+    assert any(event["event_type"] == "ownership_claimed" for event in events)
+    assert any(event["event_type"] == "resumed_failed" for event in events)
 
 
 def test_async_review_run_ttl_prunes_completed_snapshot(tmp_path: Path) -> None:
@@ -638,9 +899,9 @@ def test_async_review_run_sse_endpoint_emits_heartbeat_for_running_run(
     registry_module = importlib.import_module("papermentor_os.api.run_registry")
     original_execute_run = registry_module.InMemoryReviewRunRegistry._execute_run
 
-    def _slow_execute_run(self, run_id, ownership_epoch, reviewer, paper):
+    def _slow_execute_run(self, run_id, ownership_epoch, ownership_token, reviewer, paper):
         time.sleep(0.25)
-        return original_execute_run(self, run_id, ownership_epoch, reviewer, paper)
+        return original_execute_run(self, run_id, ownership_epoch, ownership_token, reviewer, paper)
 
     monkeypatch.setattr(
         registry_module.InMemoryReviewRunRegistry,

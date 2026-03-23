@@ -343,8 +343,16 @@
   - 查询结果已支持暴露 `stale_lease / claimable / owned_by_current_instance`，便于 follower 判断是否可接管
   - 已新增显式 `POST /review/runs/{run_id}/claim` 接口，仅允许对 stale lease 的非终态 run 发起 owner claim
   - 原 owner 在失去活跃 lease 后会停止继续写回 run 状态，降低被 stale claim 后再次覆盖 snapshot 的风险
-  - 已为 ownership 引入持久化 `ownership_epoch` fencing token；每次 `submit / claim` 都会推进执行代次，run update / worker checkpoint / lease heartbeat / 最终 `report / trace / error` 写回都必须匹配当前 epoch
-  - 已修正“旧执行分支先失去 ownership、后在新 owner 完成并释放 lease 后重新晚写覆盖终态”的竞态；一旦执行分支失去所属 epoch，就不能再重新拿到写权
+  - 已为 ownership 引入持久化 `ownership_epoch + ownership_token` 双重 fencing；每次 `submit / claim` 都会推进执行代次，并分配新的唯一 token
+  - run update / worker checkpoint / lease heartbeat / 最终 `report / trace / error` 写回都必须同时匹配当前 epoch 与 token
+  - 已修正“旧执行分支先失去 ownership、后在新 owner 完成并释放 lease 后重新晚写覆盖终态”的竞态；一旦执行分支失去所属 epoch/token，就不能再重新拿到写权
+  - 已为旧版 snapshot 增加 ownership token 兼容升级，避免在 schema 演进后因历史 run 快照缺字段而无法恢复
+  - 已修正 TTL 清理对“run 状态已先进入 terminal、但 `report / error` 仍未写回”的半终态误删，避免短 retention 窗口下查询侧提前丢 run
+  - 已将 `claim_run` 收敛为按 `run_id` 的 snapshot 锁内原子 CAS；跨实例并发 claimant 不会再基于同一 stale 视图同时 `claimed=true`
+  - 当前并发 claim 的失败方会在重新读取 winner 刚写入的 active lease 后返回 `active_foreign_lease`，避免双成功 claim 破坏 failover 决策确定性
+  - 已补齐 `_resume_claimed_run` 在 reviewer 构建阶段的异常收尾；即使 `reviewer_builder` 抛错，也会落盘 `resumed_failed`、释放 lease、避免 claim 后 run 静默悬空
+  - trace 构建现已做降级保护；即使 trace builder 异常，也不会把已完成的 review run 拖成失败，只会回落为空 trace
+  - run error mapper 现已做安全降级；即使错误映射逻辑自身抛错，async run 也会回落为通用 `internal_server_error`，不会因为二次异常失去终态落盘
   - 已在 snapshot 中持久化最小 resume 上下文：`source_path`、`stage`、`discipline`、可安全保留的 `llm` 配置，以及运行中累计的 `ReviewCheckpoint`
   - worker 完成时会实时写回 `WorkerCheckpoint`，claim 后的新 owner 可基于已完成 worker checkpoint 和原始 `docx` 自动 resume，而不是盲目从头重跑
   - 对带 request-scoped API key 的模型请求，snapshot 不持久化密钥；此类 run 允许 claim owner，但会显式标记 `resume_started=false`
@@ -471,10 +479,14 @@
   - 当前默认先做保守策略：主要收敛各 worker 的 `prompt_char_budget`
   - 对 Ark `/api/v3` 家族增加了最小 cooldown 默认值，为后续真实 provider 稳定性调优预留落点
 - `ChiefReviewer` 已开始在执行 worker 前应用 policy 覆盖，并在 worker batch 聚合阶段按固定顺序执行最小 cooldown
+- `ChiefReviewer` 的 worker cooldown 现已接入 cooperative cancel 检查
+  - 一旦 run 在 cooldown 期间失去 ownership，不再完整睡满 success/failure cooldown
+  - 会尽快中断后续 worker 聚合推进，减少 stale owner 在冷却窗口里继续占用时间的风险
 - 当前这一步已切到“固定五维并发提交 + 确定性聚合”，但还没有进入可查询异步 API，也没有改变 selective debate 的边界
 - 新增单元测试覆盖：
   - `reviewer_factory` 的 worker policy 默认值
   - `ChiefReviewer` 的 policy 应用与 success/failure cooldown
+  - `ChiefReviewer` 的 cooldown cancel 中断
   - `ChiefReviewer` 的并发 worker batch 起跑
   - 并发完成顺序下的 checkpoint / skill trace 稳定顺序
   - `ReviewRun` 生命周期与 checkpoint 集成状态
@@ -508,9 +520,16 @@
   - `empty_output`
 - `BaseReviewAgent.categorize_llm_error()` 已改为优先消费结构化错误类别，避免继续依赖字符串前缀推断
 - `ReviewLLMConfig / ProviderConfig / WorkerRunPolicy` 已增加最小退避参数承载能力，为后续 worker 级 retry 策略继续细化预留接口
+- `LLMClient` 的 retry/backoff 现已接入 cooperative cancel 检查
+  - retryable provider error 进入下一次重试前会先检查取消信号
+  - 退避 sleep 会按小片段执行，失去 ownership 后可在 backoff 中途尽快退出，而不是继续睡满整个退避窗口
+- `reviewer_factory` 构建的真实 `LLMClient` 现已把 run cancel 透传到 LLM 层
+  - 使 async claim/failover 不再只停在 orchestrator 边界
+  - 可同步阻断 worker 内部的 retry/backoff 继续消耗时间
 - 新增单元测试覆盖：
   - `LLMClient` 可重试错误的指数退避与 sleep 统计
   - `LLMClient` 非可重试 provider 错误不重复请求
+  - `LLMClient` 在第一次 provider 失败后、第二次重试前被取消时停止重试
   - `OpenAICompatibleProvider` 的 `429 -> rate_limit`
   - `OpenAICompatibleProvider` 的无效响应体 -> `invalid_response_shape`
 
@@ -626,6 +645,8 @@
   - smoke resume 路径的 payload 汇总
   - `--worker-id` 与 `--resume-after-worker-id` 互斥校验
   - 真实 `ChiefReviewer` 的单 worker smoke 路径
+  - 真实 `ChiefReviewer` 的 resume smoke 路径
+  - `--resume-after-worker-id` 不能落在最后一个 worker，避免把无意义的“全量已完成后再 resume”误判为有效 smoke
   - smoke compare-resume 路径与 CLI 参数透传
   - compare-resume 路径的 phase error 保留
   - `--phase-timeout-seconds` CLI 透传
@@ -639,7 +660,63 @@
 - 本轮真实 Ark 验证：
   - `glm-4-7-251222` + `model_with_fallback` + `prompt_char_budget=2500`
   - 使用 `--compare-resume-after-worker-id LogicChainAgent --phase-timeout-seconds 15`
-  - baseline 与 resume 两条分支都在 15s phase timeout 内未完成，当前结论是整链时延瓶颈仍未被 resume 策略单独解决
+  - `glm-4-7-251222` 的最小 `responses` REST 请求可通，但在真实 worker prompt 下出现明显的 reasoning 开销与最终文本延迟
+    - `TopicScopeAgent` 在 `timeout=30/60` 下都出现 `network_timeout`
+    - 将最小请求的 `max_output_tokens` 从 `32` 提高到 `256` 后，可稳定拿到最终 `output_text`
+    - 当前判断该模型并不适合作为首个 API 链路验收模型
+  - `deepseek-v3-2-251201` 在同一 Ark base_url 下表现明显更稳定
+    - `TopicScopeAgent` 单 worker smoke 成功，`parsed=true`
+    - `LiteratureSupportAgent` 单 worker smoke 也成功，`parsed=true`
+    - `/review/docx/async` 整链实测可完成，首轮结果达到 `4/5` worker parsed，仅 `LiteratureSupportAgent` 发生一次 fallback
+    - 在接入服务端 resume LLM 配置后，真实 async stale claim smoke 已可端到端完成
+      - `claim_result.resume_started=true`
+      - run 最终由 secondary owner 完成，事件链落到 `resumed_completed`
+      - 当前真实 failover 结果为 `3/5` worker parsed，`LogicChainAgent / LiteratureSupportAgent` 走了 fallback
+  - 真实 API 下的 async stale claim smoke 已补 timeout 现场诊断
+    - 当前超时并非 claim/fencing 先失效，而是 `claim_result.resume_started=false`
+    - 直接原因是请求中的真实 API key 属于 request-scoped key，按当前冻结边界不会持久化到 snapshot
+    - 因此 follower 能接管 ownership，但不会自动 resume 真正的模型执行
+
+### 3.18 local async API smoke harness
+
+已完成：
+
+- 新增 `scripts/run_async_api_smoke.py`
+  - 直接走 `/review/docx/async -> /review/runs/{run_id} -> /review/runs/{run_id}/events`
+  - 输出最小 async API 观测 payload：
+    - `run_id / final_state / owned_by / lease_active`
+    - `event_count / event_types`
+    - `worker_count / completed_worker_count / parsed_worker_count`
+    - `fallback_worker_ids / llm_request_attempts / llm_retry_count / llm_total_tokens`
+    - `resumed_from_checkpoint / checkpoint_completed_worker_count / skipped_worker_count / resume_start_worker_id`
+  - 默认可在本地 `rule_only` 模式下直接验证 async API 主链，无需真实 provider
+  - 开启模型模式后可直接透传 `llm` 配置，作为后续真实 provider smoke 的固定入口
+  - 现已支持可选 `claim_stale_run` 模式：
+    - 使用双实例 app 对同一 snapshot 目录演练 stale lease claim
+    - 等待 secondary 观察到 `claimable=true` 后自动触发 `POST /review/runs/{run_id}/claim`
+    - 输出 `claim_result / owned_by / event_types`，可直接验证 API 级 failover 路径
+- 新增集成测试覆盖：
+  - 真实 app 的 rule-only async API smoke 路径
+  - CLI 默认参数下的本地 async API smoke
+  - 模型模式下的 CLI LLM 参数透传
+  - stale claim async API smoke 路径
+  - claim smoke 相关 CLI 参数透传
+  - failover 超时时输出 `claim_result / last_run_payload / last_event_type` 诊断 JSON
+
+当前意义：
+
+- 当前已不只是在 reviewer 层做 smoke，也可以在 API 层直接做固定验收
+- 下一步切真实在线 provider 时，可以先用该脚本验证 `/review/docx/async` 主链，再直接演练 claim/resume 场景
+- request-scoped BYOK 不再是跨实例 auto-resume 的硬阻塞条件
+  - `create_app()` / `InMemoryReviewRunRegistry` 现已支持可选服务端 resume LLM 配置
+  - request-scoped `llm` 进入 snapshot 时仍会去敏，不持久化真实 `api_key`
+  - 但当服务端提供可恢复的模型配置时，snapshot 会额外标记 `resume_uses_server_llm_credentials=true`
+  - follower claim 后可用“请求参数 + 服务端密钥”合成 resume 所需的完整 `llm` 配置
+- `scripts/run_async_api_smoke.py` 的 stale claim 路径现在会把同一份 LLM 配置同时注入双实例 app，便于直接做真实 API failover smoke
+- 本轮新增回归覆盖：
+  - request-scoped key 且无服务端 resume 配置时，claim 仍返回 `resume_started=false`
+  - request-scoped key 且有服务端 resume 配置时，claim 可返回 `resume_started=true` 并完成 `resumed_completed`
+  - async API smoke claim 路径会把 `server_llm_config` 透传给 primary / secondary app
 
 ### 3.12 双轨 Benchmark
 
@@ -849,8 +926,19 @@
 - review run ownership epoch fencing API/单元测试
   - 新 owner 先完成后，旧 baseline 分支晚写不能覆盖终态
   - 更晚 claim 的新 owner 完成后，旧 resumed 分支晚写不能覆盖终态
+- review run 并发 claim 单赢家 API/单元测试
+  - 两个 follower 同时 claim 同一 stale run 时，只允许一个 claimant 成功进入 resume
+  - 另一 claimant 会读取到 winner 的 active lease，并以 `active_foreign_lease` 失败
+- review run claimed resume builder failure 单元测试
+  - auto-resume 在 reviewer 构建阶段失败时，run 会进入 `failed`，并释放当前 owner lease
+- review run claimed resume builder failure API 集成测试
+  - claim 接口返回 `resume_started=true` 后，即使 builder 失败，查询侧仍能稳定读到 `failed + released lease`
+- review run trace builder failure 单元测试
+  - trace 构建异常不会反向污染已完成 run 的 `completed` 终态
 - review run request-scoped key claim 不自动 resume 边界测试
+- review run request-scoped key + server resume LLM 配置后可自动 resume 单元/API 集成测试
 - review run terminal claim 边界测试
+- async API smoke claim 路径 `server_llm_config` 透传集成测试
 - review run SSE 事件流 API 集成测试
 - review run SSE `Last-Event-ID` 续传 API 集成测试
 - review run SSE heartbeat API 集成测试

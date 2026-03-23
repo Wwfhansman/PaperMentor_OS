@@ -25,6 +25,7 @@ class ReviewRunOwnershipSnapshot(BaseModel):
 
     owner_instance_id: str = Field(min_length=1)
     ownership_epoch: int = Field(default=1, ge=1)
+    ownership_token: str = Field(min_length=1)
     lease_expires_at: datetime | None = None
     last_heartbeat_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -89,6 +90,7 @@ class ReviewRunRequestSnapshot(BaseModel):
     stage: PaperStage
     discipline: Discipline
     llm: ReviewLLMConfig | None = None
+    resume_uses_server_llm_credentials: bool = False
     auto_resume_supported: bool = False
     auto_resume_reason: str | None = None
 

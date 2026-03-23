@@ -121,6 +121,13 @@ pip install pytest
 注意：
 
 - `.env` 不应提交到公共仓库
+- 如果要让 async run 在跨实例 `claim / resume` 后继续使用服务端托管凭证自动恢复，可额外配置：
+  - `PAPERMENTOR_OS_SERVER_LLM_BASE_URL`
+  - `PAPERMENTOR_OS_SERVER_LLM_API_KEY`
+  - `PAPERMENTOR_OS_SERVER_LLM_MODEL_NAME`
+  - `PAPERMENTOR_OS_SERVER_LLM_PROVIDER_ID`，默认 `openai_compatible`
+  - `PAPERMENTOR_OS_SERVER_LLM_REVIEW_BACKEND`，默认 `model_with_fallback`
+- 这组服务端变量只用于 failover / resume 恢复；请求体里的 request-scoped `llm.api_key` 仍不会持久化到 snapshot
 
 ## 9. 推荐的初始文件准备
 

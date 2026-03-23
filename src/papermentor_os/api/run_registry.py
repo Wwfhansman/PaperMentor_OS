@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -55,6 +56,7 @@ class _LocalExecutionControl:
     cancel_event: Event = field(default_factory=Event)
     lease_stop_event: Event = field(default_factory=Event)
     ownership_epoch: int | None = None
+    ownership_token: str | None = None
 
 
 class ReviewRunClaimError(RuntimeError):
@@ -76,6 +78,7 @@ class InMemoryReviewRunRegistry:
         retention_seconds: float | None = None,
         instance_id: str | None = None,
         lease_seconds: float = 30.0,
+        server_resume_llm_config: ReviewLLMConfig | None = None,
     ) -> None:
         self.reviewer_builder = reviewer_builder
         self.trace_builder = trace_builder
@@ -89,6 +92,11 @@ class InMemoryReviewRunRegistry:
         self.retention_seconds = retention_seconds
         self.instance_id = instance_id or uuid4().hex
         self.lease_seconds = lease_seconds
+        self.server_resume_llm_config = (
+            server_resume_llm_config.model_copy(deep=True)
+            if server_resume_llm_config is not None
+            else None
+        )
         if self.snapshot_dir is not None:
             self.snapshot_dir.mkdir(parents=True, exist_ok=True)
             self._load_snapshots()
@@ -108,9 +116,11 @@ class InMemoryReviewRunRegistry:
                 raise RuntimeError("review run registry is closed")
         run_id = uuid4().hex
         initial_ownership_epoch = 1
+        initial_ownership_token = uuid4().hex
         with self._lock:
             self._local_execution_controls[run_id] = _LocalExecutionControl(
                 ownership_epoch=initial_ownership_epoch,
+                ownership_token=initial_ownership_token,
             )
         try:
             reviewer = self.reviewer_builder(
@@ -118,14 +128,17 @@ class InMemoryReviewRunRegistry:
                 run_update_hook=self._build_run_update_hook(
                     run_id,
                     ownership_epoch=initial_ownership_epoch,
+                    ownership_token=initial_ownership_token,
                 ),
                 worker_checkpoint_hook=self._build_worker_checkpoint_hook(
                     run_id,
                     ownership_epoch=initial_ownership_epoch,
+                    ownership_token=initial_ownership_token,
                 ),
                 cancel_check=self._build_cancel_check(
                     run_id,
                     ownership_epoch=initial_ownership_epoch,
+                    ownership_token=initial_ownership_token,
                 ),
             )
         except Exception:
@@ -153,6 +166,7 @@ class InMemoryReviewRunRegistry:
         initial_ownership = self._active_ownership(
             timestamp,
             ownership_epoch=initial_ownership_epoch,
+            ownership_token=initial_ownership_token,
         )
         request_snapshot = self._build_request_snapshot(
             file_path=file_path,
@@ -179,6 +193,7 @@ class InMemoryReviewRunRegistry:
             self._execute_run,
             run_id,
             initial_ownership_epoch,
+            initial_ownership_token,
             reviewer,
             paper,
         )
@@ -214,62 +229,13 @@ class InMemoryReviewRunRegistry:
 
     def claim_run(self, run_id: str) -> ReviewRunClaimResponse | None:
         with self._lock:
-            self._sync_record_from_snapshot_locked(run_id)
             self._prune_expired_runs_locked()
-            record = self._runs.get(run_id)
-            if record is None:
-                return None
-            if record.run.state in {RunState.COMPLETED, RunState.FAILED}:
-                raise ReviewRunClaimError(
-                    code="terminal_run",
-                    message="cannot claim a completed or failed review run",
-                )
-            ownership = self._materialize_public_ownership(
-                record.ownership,
-                run_state=record.run.state,
-            )
-            if ownership is not None and ownership.owned_by_current_instance and ownership.lease_active:
-                return ReviewRunClaimResponse(
-                    run_id=run_id,
-                    claimed=False,
-                    previous_owner_instance_id=ownership.owner_instance_id,
-                    resume_started=False,
-                    resume_reason="current instance already owns the active lease",
-                    run=record.run.model_copy(deep=True),
-                    ownership=ownership,
-                )
-            if ownership is not None and ownership.lease_active:
-                raise ReviewRunClaimError(
-                    code="active_foreign_lease",
-                    message="cannot claim review run while another instance still holds an active lease",
-                )
-            previous_owner_instance_id = record.ownership.owner_instance_id if record.ownership is not None else None
-            next_ownership_epoch = self._next_ownership_epoch(record)
-            record.ownership = self._active_ownership(ownership_epoch=next_ownership_epoch)
-            self._append_event_locked(run_id, "ownership_claimed", record.run)
-            self._persist_record_locked(run_id)
-            resume_started = False
-            resume_reason = self._auto_resume_reason_locked(record)
-            if self._can_auto_resume_locked(record):
-                self._executor.submit(
-                    self._resume_claimed_run,
-                    run_id,
-                    next_ownership_epoch,
-                )
-                resume_started = True
-                resume_reason = "resumed_from_source_with_checkpoint"
-            return ReviewRunClaimResponse(
-                run_id=run_id,
-                claimed=True,
-                previous_owner_instance_id=previous_owner_instance_id,
-                resume_started=resume_started,
-                resume_reason=resume_reason,
-                run=record.run.model_copy(deep=True),
-                ownership=self._materialize_public_ownership(
-                    record.ownership,
-                    run_state=record.run.state,
-                ),
-            )
+            if self.snapshot_dir is None:
+                self._sync_record_from_snapshot_locked(run_id)
+                return self._claim_run_locked(run_id)
+            with self._snapshot_run_lock(run_id):
+                self._sync_record_from_snapshot_locked(run_id, snapshot_locked=True)
+                return self._claim_run_locked(run_id, snapshot_locked=True)
 
     def get_events(
         self,
@@ -304,6 +270,7 @@ class InMemoryReviewRunRegistry:
         self,
         run_id: str,
         ownership_epoch: int,
+        ownership_token: str,
         reviewer: ChiefReviewer,
         paper: PaperPackage,
     ) -> None:
@@ -313,20 +280,21 @@ class InMemoryReviewRunRegistry:
             control.cancel_event.clear()
             control.lease_stop_event.clear()
             control.ownership_epoch = ownership_epoch
+            control.ownership_token = ownership_token
             lease_stop_event = control.lease_stop_event
         lease_thread = Thread(
             target=self._renew_run_lease_until_stopped,
-            args=(run_id, ownership_epoch, lease_stop_event),
+            args=(run_id, ownership_epoch, ownership_token, lease_stop_event),
             daemon=True,
         )
         lease_thread.start()
         try:
             report = reviewer.review_paper(paper, run_id=run_id)
-            trace = self.trace_builder(reviewer)
+            trace = self._build_trace_safely(reviewer)
             with self._lock:
                 self._sync_record_from_snapshot_locked(run_id)
                 record = self._runs[run_id]
-                if not self._execution_branch_can_write_locked(record, ownership_epoch):
+                if not self._execution_branch_can_write_locked(record, ownership_epoch, ownership_token):
                     return
                 if reviewer.last_review_run is not None:
                     record.run = reviewer.last_review_run.model_copy(deep=True)
@@ -336,40 +304,48 @@ class InMemoryReviewRunRegistry:
                 self._append_event_locked(run_id, "completed", record.run)
                 record.ownership = self._released_ownership(
                     ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
                 )
                 self._persist_record_locked(run_id)
         except ReviewRunCancelledError:
             return
         except Exception as error:  # pragma: no cover - exercised through integration behavior
-            mapped_error = self.error_mapper(error)
-            trace = self.trace_builder(reviewer)
+            mapped_error = self._map_error_safely(error)
+            trace = self._build_trace_safely(reviewer)
             with self._lock:
                 self._sync_record_from_snapshot_locked(run_id)
                 record = self._runs[run_id]
-                if not self._execution_branch_can_write_locked(record, ownership_epoch):
+                if not self._execution_branch_can_write_locked(record, ownership_epoch, ownership_token):
                     return
                 if reviewer.last_review_run is not None:
                     record.run = reviewer.last_review_run.model_copy(deep=True)
                 else:
-                    record.run.state = RunState.FAILED
+                    self._mark_run_failed_locked(record)
+                record.report = None
                 record.trace = trace.model_copy(deep=True)
                 record.error = mapped_error
                 self._append_event_locked(run_id, "failed", record.run)
                 record.ownership = self._released_ownership(
                     ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
                 )
                 self._persist_record_locked(run_id)
         finally:
             lease_stop_event.set()
             lease_thread.join(timeout=max(self.lease_seconds, 0.1))
             with self._lock:
-                self._clear_local_execution_control_locked(run_id, ownership_epoch=ownership_epoch)
+                self._clear_local_execution_control_locked(
+                    run_id,
+                    ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
+                )
 
     def _build_run_update_hook(
         self,
         run_id: str,
         *,
         ownership_epoch: int,
+        ownership_token: str,
     ) -> Callable[[ReviewRun], None]:
         def _handle(run: ReviewRun) -> None:
             with self._lock:
@@ -378,11 +354,12 @@ class InMemoryReviewRunRegistry:
                 record = self._runs.get(run_id)
                 if record is None:
                     return
-                if not self._execution_branch_can_write_locked(record, ownership_epoch):
+                if not self._execution_branch_can_write_locked(record, ownership_epoch, ownership_token):
                     return
                 record.run = run.model_copy(deep=True)
                 record.ownership = self._active_ownership(
                     ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
                 )
                 self._append_event_locked(run_id, "updated", record.run)
                 self._persist_record_locked(run_id)
@@ -394,6 +371,7 @@ class InMemoryReviewRunRegistry:
         run_id: str,
         *,
         ownership_epoch: int,
+        ownership_token: str,
     ) -> Callable[[WorkerCheckpoint], None]:
         def _handle(worker_checkpoint: WorkerCheckpoint) -> None:
             with self._lock:
@@ -403,7 +381,7 @@ class InMemoryReviewRunRegistry:
                     return
                 if record.checkpoint is None:
                     return
-                if not self._execution_branch_can_write_locked(record, ownership_epoch):
+                if not self._execution_branch_can_write_locked(record, ownership_epoch, ownership_token):
                     return
                 record.checkpoint.completed_workers = [
                     item
@@ -441,7 +419,82 @@ class InMemoryReviewRunRegistry:
             public_run.finished_at = None
         return public_run
 
-    def _persist_record_locked(self, run_id: str) -> None:
+    def _claim_run_locked(
+        self,
+        run_id: str,
+        *,
+        snapshot_locked: bool = False,
+    ) -> ReviewRunClaimResponse | None:
+        record = self._runs.get(run_id)
+        if record is None:
+            return None
+        if record.run.state in {RunState.COMPLETED, RunState.FAILED}:
+            raise ReviewRunClaimError(
+                code="terminal_run",
+                message="cannot claim a completed or failed review run",
+            )
+        ownership = self._materialize_public_ownership(
+            record.ownership,
+            run_state=record.run.state,
+        )
+        if ownership is not None and ownership.owned_by_current_instance and ownership.lease_active:
+            return ReviewRunClaimResponse(
+                run_id=run_id,
+                claimed=False,
+                previous_owner_instance_id=ownership.owner_instance_id,
+                resume_started=False,
+                resume_reason="current instance already owns the active lease",
+                run=record.run.model_copy(deep=True),
+                ownership=ownership,
+            )
+        if ownership is not None and ownership.lease_active:
+            raise ReviewRunClaimError(
+                code="active_foreign_lease",
+                message="cannot claim review run while another instance still holds an active lease",
+            )
+        previous_owner_instance_id = record.ownership.owner_instance_id if record.ownership is not None else None
+        next_ownership_epoch = self._next_ownership_epoch(record)
+        next_ownership_token = uuid4().hex
+        record.ownership = self._active_ownership(
+            ownership_epoch=next_ownership_epoch,
+            ownership_token=next_ownership_token,
+        )
+        self._append_event_locked(run_id, "ownership_claimed", record.run)
+        self._persist_record_locked(run_id, snapshot_locked=snapshot_locked)
+        resume_started = False
+        resume_reason = self._auto_resume_reason_locked(record)
+        if self._can_auto_resume_locked(record):
+            self._executor.submit(
+                self._resume_claimed_run,
+                run_id,
+                next_ownership_epoch,
+                next_ownership_token,
+            )
+            resume_started = True
+            resume_reason = "resumed_from_source_with_checkpoint"
+        return ReviewRunClaimResponse(
+            run_id=run_id,
+            claimed=True,
+            previous_owner_instance_id=previous_owner_instance_id,
+            resume_started=resume_started,
+            resume_reason=resume_reason,
+            run=record.run.model_copy(deep=True),
+            ownership=self._materialize_public_ownership(
+                record.ownership,
+                run_state=record.run.state,
+            ),
+        )
+
+    def _persist_record_locked(self, run_id: str, *, snapshot_locked: bool = False) -> None:
+        if self.snapshot_dir is None:
+            return
+        if snapshot_locked:
+            self._persist_record_without_snapshot_lock_locked(run_id)
+            return
+        with self._snapshot_run_lock(run_id):
+            self._persist_record_without_snapshot_lock_locked(run_id)
+
+    def _persist_record_without_snapshot_lock_locked(self, run_id: str) -> None:
         if self.snapshot_dir is None:
             return
         record = self._runs[run_id]
@@ -455,14 +508,13 @@ class InMemoryReviewRunRegistry:
             request=record.request,
             checkpoint=record.checkpoint,
         )
-        with self._snapshot_run_lock(run_id):
-            snapshot_path = self._snapshot_path(run_id)
-            temp_path = snapshot_path.with_name(f"{snapshot_path.name}.{uuid4().hex}.tmp")
-            temp_path.write_text(
-                snapshot.model_dump_json(indent=2),
-                encoding="utf-8",
-            )
-            temp_path.replace(snapshot_path)
+        snapshot_path = self._snapshot_path(run_id)
+        temp_path = snapshot_path.with_name(f"{snapshot_path.name}.{uuid4().hex}.tmp")
+        temp_path.write_text(
+            snapshot.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        temp_path.replace(snapshot_path)
 
     def _load_snapshots(self) -> None:
         if self.snapshot_dir is None:
@@ -501,16 +553,18 @@ class InMemoryReviewRunRegistry:
     def _is_expired_record(self, record: _RunRecord, *, now) -> bool:
         if record.run.state not in {RunState.COMPLETED, RunState.FAILED}:
             return False
+        if record.report is None and record.error is None:
+            return False
         terminal_at = record.run.finished_at or record.run.updated_at
         return (now - terminal_at).total_seconds() > self.retention_seconds
 
-    def _sync_record_from_snapshot_locked(self, run_id: str) -> None:
+    def _sync_record_from_snapshot_locked(self, run_id: str, *, snapshot_locked: bool = False) -> None:
         if self.snapshot_dir is None:
             return
         snapshot_path = self._snapshot_path(run_id)
         if not snapshot_path.exists():
             return
-        snapshot = self._read_snapshot(snapshot_path)
+        snapshot = self._read_snapshot(snapshot_path, snapshot_locked=snapshot_locked)
         if snapshot is None:
             return
         existing = self._runs.get(run_id)
@@ -554,6 +608,16 @@ class InMemoryReviewRunRegistry:
         if (
             existing.ownership is not None
             and snapshot.ownership is not None
+            and (
+                snapshot.ownership.owner_instance_id != existing.ownership.owner_instance_id
+                or snapshot.ownership.ownership_token != existing.ownership.ownership_token
+            )
+            and snapshot.ownership.last_heartbeat_at >= existing.ownership.last_heartbeat_at
+        ):
+            return True
+        if (
+            existing.ownership is not None
+            and snapshot.ownership is not None
             and snapshot.ownership.last_heartbeat_at > existing.ownership.last_heartbeat_at
         ):
             return True
@@ -571,12 +635,21 @@ class InMemoryReviewRunRegistry:
             checkpoint=snapshot.checkpoint,
         )
 
-    def _read_snapshot(self, snapshot_path: Path) -> ReviewRunSnapshot | None:
+    def _read_snapshot(self, snapshot_path: Path, *, snapshot_locked: bool = False) -> ReviewRunSnapshot | None:
+        if snapshot_locked:
+            return self._read_snapshot_unlocked(snapshot_path)
         run_id = snapshot_path.stem
         with self._snapshot_run_lock(run_id):
-            if not snapshot_path.exists():
-                return None
-            return ReviewRunSnapshot.model_validate_json(snapshot_path.read_text(encoding="utf-8"))
+            return self._read_snapshot_unlocked(snapshot_path)
+
+    def _read_snapshot_unlocked(self, snapshot_path: Path) -> ReviewRunSnapshot | None:
+        if not snapshot_path.exists():
+            return None
+        payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        ownership_payload = payload.get("ownership")
+        if isinstance(ownership_payload, dict) and "ownership_token" not in ownership_payload:
+            ownership_payload["ownership_token"] = self._legacy_ownership_token(ownership_payload)
+        return ReviewRunSnapshot.model_validate(payload)
 
     @contextmanager
     def _snapshot_dir_lock(self) -> Iterator[None]:
@@ -615,13 +688,24 @@ class InMemoryReviewRunRegistry:
         self,
         run_id: str,
         ownership_epoch: int,
+        ownership_token: str,
         stop_event: Event,
     ) -> None:
         interval_seconds = max(self.lease_seconds / 3, 0.1)
         while not stop_event.wait(interval_seconds):
-            self._heartbeat_run_lease(run_id, ownership_epoch=ownership_epoch)
+            self._heartbeat_run_lease(
+                run_id,
+                ownership_epoch=ownership_epoch,
+                ownership_token=ownership_token,
+            )
 
-    def _heartbeat_run_lease(self, run_id: str, *, ownership_epoch: int) -> None:
+    def _heartbeat_run_lease(
+        self,
+        run_id: str,
+        *,
+        ownership_epoch: int,
+        ownership_token: str,
+    ) -> None:
         with self._lock:
             self._sync_record_from_snapshot_locked(run_id)
             record = self._runs.get(run_id)
@@ -629,9 +713,12 @@ class InMemoryReviewRunRegistry:
                 return
             if record.run.state in {RunState.COMPLETED, RunState.FAILED}:
                 return
-            if not self._execution_branch_can_write_locked(record, ownership_epoch):
+            if not self._execution_branch_can_write_locked(record, ownership_epoch, ownership_token):
                 return
-            record.ownership = self._active_ownership(ownership_epoch=ownership_epoch)
+            record.ownership = self._active_ownership(
+                ownership_epoch=ownership_epoch,
+                ownership_token=ownership_token,
+            )
             self._persist_record_locked(run_id)
 
     def _build_cancel_check(
@@ -639,6 +726,7 @@ class InMemoryReviewRunRegistry:
         run_id: str,
         *,
         ownership_epoch: int,
+        ownership_token: str,
     ) -> Callable[[], bool]:
         def _handle() -> bool:
             with self._lock:
@@ -646,13 +734,18 @@ class InMemoryReviewRunRegistry:
                 if control is not None and (
                     control.cancel_event.is_set()
                     or control.ownership_epoch != ownership_epoch
+                    or control.ownership_token != ownership_token
                 ):
                     return True
                 self._sync_record_from_snapshot_locked(run_id)
                 record = self._runs.get(run_id)
                 if record is None:
                     return False
-                return not self._execution_branch_can_write_locked(record, ownership_epoch)
+                return not self._execution_branch_can_write_locked(
+                    record,
+                    ownership_epoch,
+                    ownership_token,
+                )
 
         return _handle
 
@@ -667,6 +760,7 @@ class InMemoryReviewRunRegistry:
                 ownership is not None
                 and ownership.owner_instance_id == self.instance_id
                 and ownership.ownership_epoch == control.ownership_epoch
+                and ownership.ownership_token == control.ownership_token
                 and record.report is None
                 and record.error is None
             ):
@@ -679,6 +773,7 @@ class InMemoryReviewRunRegistry:
         if (
             ownership.owner_instance_id == self.instance_id
             and ownership.ownership_epoch == control.ownership_epoch
+            and ownership.ownership_token == control.ownership_token
         ):
             return
         self._cancel_local_execution_locked(run_id)
@@ -690,49 +785,64 @@ class InMemoryReviewRunRegistry:
         control.cancel_event.set()
         control.lease_stop_event.set()
 
-    def _resume_claimed_run(self, run_id: str, ownership_epoch: int) -> None:
+    def _resume_claimed_run(self, run_id: str, ownership_epoch: int, ownership_token: str) -> None:
+        reviewer: ChiefReviewer | None = None
+        lease_thread: Thread | None = None
+        lease_stop_event = Event()
         with self._lock:
             self._sync_record_from_snapshot_locked(run_id)
             record = self._runs.get(run_id)
             if record is None or not self._can_auto_resume_locked(record):
                 return
-            if not self._execution_branch_can_write_locked(record, ownership_epoch):
+            if not self._execution_branch_can_write_locked(record, ownership_epoch, ownership_token):
                 return
             request = record.request
             checkpoint = record.checkpoint.model_copy(deep=True) if record.checkpoint is not None else None
-            llm_config = request.llm.model_copy(deep=True) if request is not None and request.llm is not None else None
+            llm_config = self._resume_llm_config_for_request(request)
             file_path = Path(request.file_path)
             stage = request.stage
             discipline = request.discipline
 
-        reviewer = self.reviewer_builder(
-            llm_config,
-            run_update_hook=self._build_run_update_hook(
-                run_id,
-                ownership_epoch=ownership_epoch,
-            ),
-            worker_checkpoint_hook=self._build_worker_checkpoint_hook(
-                run_id,
-                ownership_epoch=ownership_epoch,
-            ),
-            cancel_check=self._build_cancel_check(
-                run_id,
-                ownership_epoch=ownership_epoch,
-            ),
-        )
-        with self._lock:
-            control = self._local_execution_controls.setdefault(run_id, _LocalExecutionControl())
-            control.cancel_event.clear()
-            control.lease_stop_event.clear()
-            control.ownership_epoch = ownership_epoch
-            lease_stop_event = control.lease_stop_event
-        lease_thread = Thread(
-            target=self._renew_run_lease_until_stopped,
-            args=(run_id, ownership_epoch, lease_stop_event),
-            daemon=True,
-        )
-        lease_thread.start()
         try:
+            reviewer = self.reviewer_builder(
+                llm_config,
+                run_update_hook=self._build_run_update_hook(
+                    run_id,
+                    ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
+                ),
+                worker_checkpoint_hook=self._build_worker_checkpoint_hook(
+                    run_id,
+                    ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
+                ),
+                cancel_check=self._build_cancel_check(
+                    run_id,
+                    ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
+                ),
+            )
+            with self._lock:
+                self._sync_record_from_snapshot_locked(run_id)
+                record = self._runs.get(run_id)
+                if record is None or not self._execution_branch_can_write_locked(
+                    record,
+                    ownership_epoch,
+                    ownership_token,
+                ):
+                    return
+                control = self._local_execution_controls.setdefault(run_id, _LocalExecutionControl())
+                control.cancel_event.clear()
+                control.lease_stop_event.clear()
+                control.ownership_epoch = ownership_epoch
+                control.ownership_token = ownership_token
+                lease_stop_event = control.lease_stop_event
+            lease_thread = Thread(
+                target=self._renew_run_lease_until_stopped,
+                args=(run_id, ownership_epoch, ownership_token, lease_stop_event),
+                daemon=True,
+            )
+            lease_thread.start()
             report = reviewer.review_docx(
                 file_path,
                 stage=stage,
@@ -740,11 +850,15 @@ class InMemoryReviewRunRegistry:
                 checkpoint=checkpoint,
                 run_id=run_id,
             )
-            trace = self.trace_builder(reviewer)
+            trace = self._build_trace_safely(reviewer)
             with self._lock:
                 self._sync_record_from_snapshot_locked(run_id)
                 record = self._runs.get(run_id)
-                if record is None or not self._execution_branch_can_write_locked(record, ownership_epoch):
+                if record is None or not self._execution_branch_can_write_locked(
+                    record,
+                    ownership_epoch,
+                    ownership_token,
+                ):
                     return
                 if reviewer.last_review_run is not None:
                     record.run = reviewer.last_review_run.model_copy(deep=True)
@@ -753,46 +867,60 @@ class InMemoryReviewRunRegistry:
                 record.error = None
                 record.ownership = self._released_ownership(
                     ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
                 )
                 self._append_event_locked(run_id, "resumed_completed", record.run)
                 self._persist_record_locked(run_id)
         except ReviewRunCancelledError:
             return
         except Exception as error:  # pragma: no cover - integration behavior
-            mapped_error = self.error_mapper(error)
-            trace = self.trace_builder(reviewer)
+            mapped_error = self._map_error_safely(error)
+            trace = self._build_trace_safely(reviewer)
             with self._lock:
                 self._sync_record_from_snapshot_locked(run_id)
                 record = self._runs.get(run_id)
-                if record is None or not self._execution_branch_can_write_locked(record, ownership_epoch):
+                if record is None or not self._execution_branch_can_write_locked(
+                    record,
+                    ownership_epoch,
+                    ownership_token,
+                ):
                     return
-                if reviewer.last_review_run is not None:
+                if reviewer is not None and reviewer.last_review_run is not None:
                     record.run = reviewer.last_review_run.model_copy(deep=True)
                 else:
-                    record.run.state = RunState.FAILED
+                    self._mark_run_failed_locked(record)
+                record.report = None
                 record.trace = trace.model_copy(deep=True)
                 record.error = mapped_error
                 record.ownership = self._released_ownership(
                     ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
                 )
                 self._append_event_locked(run_id, "resumed_failed", record.run)
                 self._persist_record_locked(run_id)
         finally:
             lease_stop_event.set()
-            lease_thread.join(timeout=max(self.lease_seconds, 0.1))
+            if lease_thread is not None:
+                lease_thread.join(timeout=max(self.lease_seconds, 0.1))
             with self._lock:
-                self._clear_local_execution_control_locked(run_id, ownership_epoch=ownership_epoch)
+                self._clear_local_execution_control_locked(
+                    run_id,
+                    ownership_epoch=ownership_epoch,
+                    ownership_token=ownership_token,
+                )
 
     def _active_ownership(
         self,
         timestamp=None,
         *,
         ownership_epoch: int,
+        ownership_token: str,
     ) -> ReviewRunOwnershipSnapshot:
         now = timestamp or utc_now()
         return ReviewRunOwnershipSnapshot(
             owner_instance_id=self.instance_id,
             ownership_epoch=ownership_epoch,
+            ownership_token=ownership_token,
             lease_expires_at=now + timedelta(seconds=self.lease_seconds),
             last_heartbeat_at=now,
         )
@@ -802,11 +930,13 @@ class InMemoryReviewRunRegistry:
         timestamp=None,
         *,
         ownership_epoch: int,
+        ownership_token: str,
     ) -> ReviewRunOwnershipSnapshot:
         now = timestamp or utc_now()
         return ReviewRunOwnershipSnapshot(
             owner_instance_id=self.instance_id,
             ownership_epoch=ownership_epoch,
+            ownership_token=ownership_token,
             lease_expires_at=None,
             last_heartbeat_at=now,
         )
@@ -848,7 +978,14 @@ class InMemoryReviewRunRegistry:
         llm_config: ReviewLLMConfig | None,
     ) -> ReviewRunRequestSnapshot:
         sanitized_llm_config = self._sanitize_llm_config_for_resume(llm_config)
-        auto_resume_supported = file_path.exists() and sanitized_llm_config is not None
+        request_had_api_key = bool(llm_config is not None and llm_config.api_key)
+        resume_uses_server_llm_credentials = self._should_use_server_resume_llm(llm_config)
+        effective_resume_llm_config = self._effective_resume_llm_config(
+            sanitized_llm_config,
+            request_had_api_key=request_had_api_key,
+            resume_uses_server_llm_credentials=resume_uses_server_llm_credentials,
+        )
+        auto_resume_supported = file_path.exists() and effective_resume_llm_config is not None
         auto_resume_reason = None if auto_resume_supported else self._build_auto_resume_reason(
             file_path=file_path,
             llm_config=llm_config,
@@ -858,6 +995,7 @@ class InMemoryReviewRunRegistry:
             stage=stage,
             discipline=discipline,
             llm=sanitized_llm_config,
+            resume_uses_server_llm_credentials=resume_uses_server_llm_credentials,
             auto_resume_supported=auto_resume_supported,
             auto_resume_reason=auto_resume_reason,
         )
@@ -868,9 +1006,10 @@ class InMemoryReviewRunRegistry:
     ) -> ReviewLLMConfig | None:
         if llm_config is None:
             return ReviewLLMConfig()
-        if llm_config.api_key:
-            return None
-        return llm_config.model_copy(deep=True)
+        sanitized_llm_config = llm_config.model_copy(deep=True)
+        if sanitized_llm_config.api_key:
+            sanitized_llm_config.api_key = None
+        return sanitized_llm_config
 
     def _build_auto_resume_reason(
         self,
@@ -880,7 +1019,7 @@ class InMemoryReviewRunRegistry:
     ) -> str:
         if not file_path.exists():
             return "source_path_missing"
-        if llm_config is not None and llm_config.api_key:
+        if llm_config is not None and llm_config.api_key and not self._should_use_server_resume_llm(llm_config):
             return "request_scoped_api_key_not_persisted"
         return "resume_context_unavailable"
 
@@ -892,6 +1031,8 @@ class InMemoryReviewRunRegistry:
             return False
         if not Path(request.file_path).exists():
             return False
+        if request.resume_uses_server_llm_credentials and self._resume_llm_config_for_request(request) is None:
+            return False
         return True
 
     def _auto_resume_reason_locked(self, record: _RunRecord) -> str:
@@ -901,6 +1042,46 @@ class InMemoryReviewRunRegistry:
         if request.auto_resume_supported:
             return "resume_not_started"
         return request.auto_resume_reason or "resume_not_supported"
+
+    def _should_use_server_resume_llm(self, llm_config: ReviewLLMConfig | None) -> bool:
+        return bool(llm_config is not None and llm_config.api_key and self.server_resume_llm_config is not None)
+
+    def _effective_resume_llm_config(
+        self,
+        llm_config: ReviewLLMConfig | None,
+        *,
+        request_had_api_key: bool,
+        resume_uses_server_llm_credentials: bool,
+    ) -> ReviewLLMConfig | None:
+        if resume_uses_server_llm_credentials:
+            return self._merge_server_resume_llm_config(llm_config)
+        if request_had_api_key:
+            return None
+        return llm_config
+
+    def _resume_llm_config_for_request(
+        self,
+        request: ReviewRunRequestSnapshot | None,
+    ) -> ReviewLLMConfig | None:
+        if request is None:
+            return None
+        llm_config = request.llm.model_copy(deep=True) if request.llm is not None else None
+        if request.resume_uses_server_llm_credentials:
+            return self._merge_server_resume_llm_config(llm_config)
+        return llm_config
+
+    def _merge_server_resume_llm_config(
+        self,
+        llm_config: ReviewLLMConfig | None,
+    ) -> ReviewLLMConfig | None:
+        if self.server_resume_llm_config is None:
+            return None
+        merged_payload = self.server_resume_llm_config.model_dump(mode="python")
+        if llm_config is not None:
+            request_payload = llm_config.model_dump(mode="python", exclude_none=True)
+            request_payload.pop("api_key", None)
+            merged_payload.update(request_payload)
+        return ReviewLLMConfig.model_validate(merged_payload)
 
     def _current_instance_can_write_locked(self, record: _RunRecord) -> bool:
         ownership = record.ownership
@@ -914,6 +1095,7 @@ class InMemoryReviewRunRegistry:
         self,
         record: _RunRecord,
         ownership_epoch: int,
+        ownership_token: str,
     ) -> bool:
         ownership = record.ownership
         if ownership is None:
@@ -921,6 +1103,7 @@ class InMemoryReviewRunRegistry:
         return (
             ownership.owner_instance_id == self.instance_id
             and ownership.ownership_epoch == ownership_epoch
+            and ownership.ownership_token == ownership_token
         )
 
     def _next_ownership_epoch(self, record: _RunRecord) -> int:
@@ -928,10 +1111,50 @@ class InMemoryReviewRunRegistry:
             return 1
         return record.ownership.ownership_epoch + 1
 
-    def _clear_local_execution_control_locked(self, run_id: str, *, ownership_epoch: int) -> None:
+    def _legacy_ownership_token(self, ownership_payload: dict[str, object]) -> str:
+        owner_instance_id = ownership_payload.get("owner_instance_id", "unknown-owner")
+        ownership_epoch = ownership_payload.get("ownership_epoch", 1)
+        last_heartbeat_at = ownership_payload.get("last_heartbeat_at", "unknown-heartbeat")
+        return f"legacy:{owner_instance_id}:{ownership_epoch}:{last_heartbeat_at}"
+
+    def _build_trace_safely(self, reviewer: ChiefReviewer | None) -> ReviewTrace:
+        if reviewer is None:
+            return ReviewTrace()
+        try:
+            return self.trace_builder(reviewer)
+        except Exception:
+            return ReviewTrace()
+
+    def _map_error_safely(self, error: Exception) -> ReviewRunError:
+        try:
+            return self.error_mapper(error)
+        except Exception:
+            return ReviewRunError(
+                code="internal_server_error",
+                message="review run failed unexpectedly.",
+                retryable=False,
+            )
+
+    def _mark_run_failed_locked(self, record: _RunRecord) -> None:
+        failed_at = utc_now()
+        record.run = record.run.model_copy(
+            update={
+                "state": RunState.FAILED,
+                "updated_at": failed_at,
+                "finished_at": failed_at,
+            }
+        )
+
+    def _clear_local_execution_control_locked(
+        self,
+        run_id: str,
+        *,
+        ownership_epoch: int,
+        ownership_token: str,
+    ) -> None:
         control = self._local_execution_controls.get(run_id)
         if control is None:
             return
-        if control.ownership_epoch != ownership_epoch:
+        if control.ownership_epoch != ownership_epoch or control.ownership_token != ownership_token:
             return
         self._local_execution_controls.pop(run_id, None)

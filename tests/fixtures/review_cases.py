@@ -34,6 +34,15 @@ class TableSpec:
 
 
 @dataclass(frozen=True)
+class BenchmarkExpectationOverride:
+    variant_id: str
+    expected_debate_dimensions: tuple[Dimension, ...] | None = None
+    expected_high_severity_dimensions: tuple[Dimension, ...] | None = None
+    expected_priority_first_dimension: Dimension | None = None
+    expected_issue_titles: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
 class ReviewCaseSpec:
     case_id: str
     tags: tuple[str, ...]
@@ -55,6 +64,17 @@ class ReviewCaseSpec:
     expected_high_severity_dimensions: tuple[Dimension, ...] = ()
     expected_priority_first_dimension: Dimension | None = None
     expected_issue_titles: tuple[str, ...] = ()
+    benchmark_expectation_overrides: tuple[BenchmarkExpectationOverride, ...] = ()
+
+
+MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE = (
+    BenchmarkExpectationOverride(
+        variant_id="model_with_fallback",
+        expected_high_severity_dimensions=(),
+        expected_debate_dimensions=(),
+        expected_issue_titles=(),
+    ),
+)
 
 
 MINIMAL_REVIEW_CASE = ReviewCaseSpec(
@@ -154,12 +174,13 @@ STRONG_REVIEW_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
 TOPIC_PRECISION_CASE = ReviewCaseSpec(
     case_id="topic_precision_case",
-    tags=("precision_sample", "evaluation_fixture", "topic_precision"),
+    tags=("precision_sample", "evaluation_fixture", "topic_precision", "model_semantic_fixture"),
     title="面向本科论文初审的多智能体评审系统设计与实现",
     abstract=(
         "面向本科论文初审的多智能体评审系统设计与实现聚焦导师早期反馈效率不足的问题。"
@@ -219,12 +240,21 @@ TOPIC_PRECISION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE + (
+        BenchmarkExpectationOverride(
+            variant_id="model_only",
+            expected_high_severity_dimensions=(),
+            expected_debate_dimensions=(),
+            expected_priority_first_dimension=Dimension.TOPIC_SCOPE,
+            expected_issue_titles=("模型判断研究问题定义还可以再收束",),
+        ),
+    ),
 )
 
 
 LOGIC_PRECISION_CASE = ReviewCaseSpec(
     case_id="logic_precision_case",
-    tags=("precision_sample", "evaluation_fixture", "logic_precision"),
+    tags=("precision_sample", "evaluation_fixture", "logic_precision", "model_semantic_fixture"),
     title="面向本科论文初审的论证链审查框架设计",
     abstract=(
         "面向本科论文初审的论证链审查框架设计聚焦毕业论文草稿中验证链条不完整的问题。"
@@ -284,12 +314,21 @@ LOGIC_PRECISION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE + (
+        BenchmarkExpectationOverride(
+            variant_id="model_only",
+            expected_high_severity_dimensions=(),
+            expected_debate_dimensions=(),
+            expected_priority_first_dimension=Dimension.LOGIC_CHAIN,
+            expected_issue_titles=("模型判断结论段对验证结果的回收还可以更集中",),
+        ),
+    ),
 )
 
 
 LITERATURE_PRECISION_CASE = ReviewCaseSpec(
     case_id="literature_precision_case",
-    tags=("precision_sample", "evaluation_fixture", "literature_precision"),
+    tags=("precision_sample", "evaluation_fixture", "literature_precision", "model_semantic_fixture"),
     title="面向本科论文初审的文献支撑分析框架",
     abstract=(
         "面向本科论文初审的文献支撑分析框架聚焦毕业论文草稿中相关工作定位不清和比较分析不足的问题。"
@@ -349,12 +388,21 @@ LITERATURE_PRECISION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE + (
+        BenchmarkExpectationOverride(
+            variant_id="model_only",
+            expected_high_severity_dimensions=(),
+            expected_debate_dimensions=(),
+            expected_priority_first_dimension=Dimension.LITERATURE_SUPPORT,
+            expected_issue_titles=("模型判断相关工作比较段还可以更明确收束差异点",),
+        ),
+    ),
 )
 
 
 NOVELTY_PRECISION_CASE = ReviewCaseSpec(
     case_id="novelty_precision_case",
-    tags=("precision_sample", "evaluation_fixture", "novelty_precision"),
+    tags=("precision_sample", "evaluation_fixture", "novelty_precision", "model_semantic_fixture"),
     title="面向本科论文初审的多维证据约束评审框架",
     abstract=(
         "面向本科论文初审的多维证据约束评审框架聚焦毕业论文草稿中高优先级问题定位不稳定的现实问题。"
@@ -414,12 +462,21 @@ NOVELTY_PRECISION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE + (
+        BenchmarkExpectationOverride(
+            variant_id="model_only",
+            expected_high_severity_dimensions=(),
+            expected_debate_dimensions=(),
+            expected_priority_first_dimension=Dimension.NOVELTY_DEPTH,
+            expected_issue_titles=("模型判断创新点表述还可以再压缩成更集中的一句",),
+        ),
+    ),
 )
 
 
 WRITING_PRECISION_CASE = ReviewCaseSpec(
     case_id="writing_precision_case",
-    tags=("precision_sample", "evaluation_fixture", "writing_precision"),
+    tags=("precision_sample", "evaluation_fixture", "writing_precision", "model_semantic_fixture"),
     title="面向本科论文初审的结构化评审框架",
     abstract=(
         "本文针对本科论文初审效率不足的问题，构建结构化评审框架，"
@@ -476,6 +533,15 @@ WRITING_PRECISION_CASE = ReviewCaseSpec(
         Dimension.LITERATURE_SUPPORT,
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
+    ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE + (
+        BenchmarkExpectationOverride(
+            variant_id="model_only",
+            expected_high_severity_dimensions=(),
+            expected_debate_dimensions=(),
+            expected_priority_first_dimension=Dimension.WRITING_FORMAT,
+            expected_issue_titles=("模型判断摘要句间衔接还可以更紧凑",),
+        ),
     ),
 )
 
@@ -539,6 +605,7 @@ TEMPLATE_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -605,6 +672,7 @@ COVER_PAGE_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -677,6 +745,7 @@ COVER_PAGE_TABLE_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -760,6 +829,7 @@ BACK_MATTER_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -838,6 +908,7 @@ POST_REFERENCE_BIO_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -906,6 +977,7 @@ CONTENTS_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -978,6 +1050,7 @@ COMPLEX_CONTENTS_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1053,6 +1126,7 @@ CONTENTS_HEADER_FOOTER_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1120,6 +1194,7 @@ CAPTION_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1187,6 +1262,7 @@ EQUATION_CAPTION_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1254,6 +1330,7 @@ ANNOTATION_BLOCK_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1321,6 +1398,7 @@ FOOTER_FOOTNOTE_NOISE_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1399,6 +1477,7 @@ RUNNING_HEADER_FOOTER_METADATA_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1477,6 +1556,7 @@ RUNNING_ENGLISH_HEADER_FOOTER_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1542,6 +1622,7 @@ ABSTRACT_RUNNING_HEADER_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1609,6 +1690,7 @@ REPEATED_SECTION_HEADER_NOISE_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1675,6 +1757,7 @@ FOOTNOTE_BODY_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1742,6 +1825,7 @@ DOCX_FOOTNOTE_OBJECT_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1809,6 +1893,7 @@ DOCX_ENDNOTE_OBJECT_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1879,6 +1964,7 @@ MIXED_NOTE_OBJECT_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -1957,6 +2043,7 @@ MULTILINE_NOTE_OBJECT_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2043,6 +2130,7 @@ TABLE_ADJACENT_NOTE_OBJECT_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2107,6 +2195,7 @@ REPEATED_PARENT_SECTION_HEADER_NOISE_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2178,6 +2267,7 @@ REPEATED_SUBSECTION_HEADER_NOISE_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2249,6 +2339,7 @@ ABBREVIATED_SECTION_HEADER_NOISE_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2320,6 +2411,7 @@ UNNUMBERED_ABBREVIATED_SECTION_HEADER_NOISE_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2393,6 +2485,7 @@ CONTENTS_FIELD_CODE_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2466,6 +2559,7 @@ KEYWORD_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2536,6 +2630,7 @@ METADATA_BLOCK_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2605,6 +2700,7 @@ AUTHOR_INFO_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2684,6 +2780,7 @@ APPENDIX_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2771,6 +2868,7 @@ ENGLISH_APPENDIX_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2841,6 +2939,7 @@ DEPARTMENT_INFO_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2912,6 +3011,7 @@ BILINGUAL_ABSTRACT_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -2981,6 +3081,7 @@ DECLARATION_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -3077,6 +3178,7 @@ FRONT_MATTER_COMBO_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -3150,6 +3252,7 @@ FRONT_MATTER_SPACING_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -3227,6 +3330,7 @@ FRONT_MATTER_MULTILINE_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -3312,6 +3416,7 @@ APPENDIX_CONTENTS_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -3385,6 +3490,7 @@ FRONT_MATTER_TABLE_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -3476,6 +3582,7 @@ APPENDIX_FIGURE_LIST_VARIATION_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -3551,6 +3658,7 @@ DOCX_TABLE_FRONT_MATTER_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -3641,6 +3749,7 @@ COMPLEX_TABLE_FRONT_MATTER_CASE = ReviewCaseSpec(
         Dimension.NOVELTY_DEPTH,
         Dimension.WRITING_FORMAT,
     ),
+    benchmark_expectation_overrides=MODEL_WITH_FALLBACK_NO_FINDINGS_OVERRIDE,
 )
 
 
@@ -3698,6 +3807,36 @@ WEAK_REVIEW_CASE = ReviewCaseSpec(
         "摘要信息量不足",
         "缺少参考文献列表",
     ),
+    benchmark_expectation_overrides=(
+        BenchmarkExpectationOverride(
+            variant_id="model_with_fallback",
+            expected_high_severity_dimensions=(
+                Dimension.TOPIC_SCOPE,
+                Dimension.LOGIC_CHAIN,
+                Dimension.LITERATURE_SUPPORT,
+                Dimension.NOVELTY_DEPTH,
+                Dimension.WRITING_FORMAT,
+            ),
+            expected_priority_first_dimension=Dimension.TOPIC_SCOPE,
+            expected_issue_titles=(
+                "摘要没有明确点出研究问题",
+                "摘要缺少方法或结果闭环",
+                "标题与摘要的一致性偏弱",
+                "标题偏泛，范围边界不够具体",
+                "正文前部未快速建立研究问题",
+                "论证链缺少明确的验证环节",
+                "缺少显式结论章节，论证收束不足",
+                "参考文献数量偏少，难以支撑毕业论文评审",
+                "缺少显式相关工作或文献综述部分",
+                "缺少与已有方法或基线的比较意识",
+                "论文没有明确交代创新点或研究贡献",
+                "论文更像系统实现说明，研究深度不足",
+                "章节结构不足以支撑毕业论文草稿",
+                "摘要信息量不足",
+                "缺少参考文献列表",
+            ),
+        ),
+    ),
 )
 
 
@@ -3743,6 +3882,27 @@ BOUNDARY_REVIEW_CASE = ReviewCaseSpec(
         "论文更像系统实现说明，研究深度不足",
         "摘要信息量不足",
         "缺少参考文献列表",
+    ),
+    benchmark_expectation_overrides=(
+        BenchmarkExpectationOverride(
+            variant_id="model_with_fallback",
+            expected_debate_dimensions=(
+                Dimension.LOGIC_CHAIN,
+                Dimension.NOVELTY_DEPTH,
+            ),
+            expected_issue_titles=(
+                "摘要缺少方法或结果闭环",
+                "标题与摘要的一致性偏弱",
+                "标题偏泛，范围边界不够具体",
+                "论证链缺少明确的验证环节",
+                "参考文献数量偏少，难以支撑毕业论文评审",
+                "缺少显式相关工作或文献综述部分",
+                "缺少与已有方法或基线的比较意识",
+                "论文更像系统实现说明，研究深度不足",
+                "摘要信息量不足",
+                "缺少参考文献列表",
+            ),
+        ),
     ),
 )
 

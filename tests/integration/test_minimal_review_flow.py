@@ -102,6 +102,9 @@ def test_chief_reviewer_collects_debate_candidates_for_ambiguous_case(tmp_path: 
     debate_dimensions = {case.dimension for case in reviewer.last_debate_candidates}
     assert Dimension.LOGIC_CHAIN in debate_dimensions or Dimension.NOVELTY_DEPTH in debate_dimensions
     assert reviewer.last_debate_resolutions
+    assert reviewer.last_debate_resolution_traces
+    assert all(item.dimension in debate_dimensions for item in reviewer.last_debate_resolution_traces)
+    assert all(item.decision_policy_summary for item in reviewer.last_debate_resolution_traces)
     assert any(item.debate_used for item in report.dimension_reports if item.dimension in debate_dimensions)
 
 
@@ -157,6 +160,8 @@ def test_boundary_review_case_keeps_selective_debate_on_subjective_dimensions(tm
     assert all(item.dimension in debate_dimensions for item in report.dimension_reports if item.debate_used)
     assert reviewer.last_worker_skill_traces
     assert reviewer.last_worker_execution_traces
+    assert reviewer.last_debate_resolution_traces
+    assert all(item.upheld_finding_count >= 0 for item in reviewer.last_debate_resolution_traces)
     assert reviewer.last_orchestration_trace is not None
     assert reviewer.last_orchestration_trace.debate_candidate_dimensions
     assert reviewer.last_orchestration_trace.debated_dimensions

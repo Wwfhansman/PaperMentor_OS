@@ -648,7 +648,22 @@ class ChiefReviewer:
         )
         if cooldown_ms <= 0:
             return
-        self.sleep_fn(cooldown_ms / 1000)
+        self._sleep_with_cancel(cooldown_ms / 1000)
+
+    def _sleep_with_cancel(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        if self.cancel_check is None:
+            self.sleep_fn(seconds)
+            return
+
+        remaining = seconds
+        while remaining > 0:
+            self._raise_if_cancelled()
+            sleep_seconds = min(remaining, 0.05)
+            self.sleep_fn(sleep_seconds)
+            remaining -= sleep_seconds
+        self._raise_if_cancelled()
 
     def _status_from_execution_metadata(self, execution_metadata: WorkerExecutionMetadata) -> RunState:
         if execution_metadata.fallback_used:

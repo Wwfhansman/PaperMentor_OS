@@ -1,7 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from papermentor_os.llm import ReviewBackend, ReviewLLMConfig
+import pytest
+
+from papermentor_os.llm import LLMConfigurationError, ReviewBackend, ReviewLLMConfig
 from papermentor_os.reviewer_factory import build_chief_reviewer
 from papermentor_os.schemas.report import DimensionReport
 from papermentor_os.schemas.trace import WorkerExecutionTrace
@@ -24,6 +26,9 @@ class _StubReviewer:
             priority_actions=[object()],
         )
 
+    def worker_ids(self) -> list[str]:
+        return [worker_run.worker_id for worker_run in self.last_worker_execution_traces]
+
     def run_worker_smoke(self, file_path: Path, worker_id: str) -> tuple[DimensionReport, WorkerExecutionTrace]:
         assert file_path.exists()
         selected_runs = [item for item in self.last_worker_execution_traces if item.worker_id == worker_id]
@@ -44,6 +49,15 @@ class _StubResumeReviewer(_StubReviewer):
     def __init__(self, worker_runs: list[WorkerExecutionTrace]) -> None:
         super().__init__(worker_runs)
         self.parser = SimpleNamespace(parse_file=lambda file_path: SimpleNamespace(file_path=file_path))
+
+    def worker_ids(self) -> list[str]:
+        return [
+            "TopicScopeAgent",
+            "LogicChainAgent",
+            "LiteratureSupportAgent",
+            "NoveltyDepthAgent",
+            "WritingFormatAgent",
+        ]
 
     def run_review_until(self, paper: SimpleNamespace, *, stop_after_worker_id: str) -> SimpleNamespace:
         assert paper.file_path.exists()
@@ -261,6 +275,24 @@ def test_run_live_llm_smoke_single_worker_supports_real_chief_reviewer() -> None
     assert payload["resume_after_worker_id"] is None
 
 
+def test_run_live_llm_smoke_resume_path_supports_real_chief_reviewer() -> None:
+    payload = run_live_llm_smoke(
+        llm_config=ReviewLLMConfig(),
+        resume_after_worker_id="LogicChainAgent",
+        reviewer_builder=lambda _: build_chief_reviewer(),
+    )
+
+    assert payload["selected_worker_id"] is None
+    assert payload["resume_after_worker_id"] == "LogicChainAgent"
+    assert payload["resumed_from_checkpoint"] is True
+    assert payload["checkpoint_completed_worker_count"] == 2
+    assert payload["skipped_worker_count"] == 2
+    assert payload["resume_start_worker_id"] == "LiteratureSupportAgent"
+    assert payload["worker_count"] == 5
+    assert payload["parsed_worker_count"] == 0
+    assert payload["all_workers_parsed"] is False
+
+
 def test_run_live_llm_smoke_supports_resume_path() -> None:
     llm_config = ReviewLLMConfig(
         review_backend=ReviewBackend.MODEL_WITH_FALLBACK,
@@ -311,6 +343,18 @@ def test_run_live_llm_smoke_supports_resume_path() -> None:
     assert payload["llm_request_attempts"] == 3
     assert payload["llm_total_tokens"] == 59
     assert payload["elapsed_seconds"] >= 0.0
+
+
+def test_run_live_llm_smoke_rejects_resuming_after_final_worker() -> None:
+    with pytest.raises(
+        LLMConfigurationError,
+        match="stop before the final worker",
+    ):
+        run_live_llm_smoke(
+            llm_config=ReviewLLMConfig(),
+            resume_after_worker_id="WritingFormatAgent",
+            reviewer_builder=lambda _: build_chief_reviewer(),
+        )
 
 
 def test_run_live_llm_smoke_comparison_supports_direct_vs_resume() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from papermentor_os.schemas.debate import DebateResolution
 from papermentor_os.schemas.report import DimensionReport, ReviewFinding
+from papermentor_os.schemas.trace import WorkerExecutionMetadata
 from papermentor_os.schemas.types import Dimension, Severity
 
 
@@ -24,9 +25,16 @@ class EvidenceLedger:
     def __init__(self) -> None:
         self._dimension_reports: dict[Dimension, DimensionReport] = {}
         self._debate_results: dict[Dimension, DebateResolution] = {}
+        self._execution_metadata: dict[Dimension, WorkerExecutionMetadata] = {}
 
-    def record_dimension_report(self, report: DimensionReport) -> None:
+    def record_dimension_report(
+        self,
+        report: DimensionReport,
+        execution_metadata: WorkerExecutionMetadata | None = None,
+    ) -> None:
         self._dimension_reports[report.dimension] = report
+        if execution_metadata is not None:
+            self._execution_metadata[report.dimension] = execution_metadata
 
     def record_debate_result(
         self,
@@ -59,6 +67,9 @@ class EvidenceLedger:
                 key=lambda dimension: DIMENSION_PRIORITY[dimension],
             )
         ]
+
+    def get_execution_metadata(self, dimension: Dimension) -> WorkerExecutionMetadata | None:
+        return self._execution_metadata.get(dimension)
 
     def get_findings_by_priority(self, limit: int | None = None) -> list[ReviewFinding]:
         findings = sorted(

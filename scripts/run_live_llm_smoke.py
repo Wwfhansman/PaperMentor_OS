@@ -275,6 +275,7 @@ def _run_full_review_smoke(
 ):
     if resume_after_worker_id is None:
         return reviewer.review_docx(file_path)
+    _validate_resume_after_worker_id(reviewer, resume_after_worker_id)
     parser = getattr(reviewer, "parser", None)
     if parser is None or not hasattr(parser, "parse_file"):
         raise LLMConfigurationError("Resume smoke requires reviewer.parser.parse_file().")
@@ -320,6 +321,22 @@ def _worker_run_parsed(worker_run: WorkerExecutionTrace) -> bool:
         and worker_run.structured_output_status == "parsed"
         and not worker_run.fallback_used
     )
+
+
+def _validate_resume_after_worker_id(reviewer: object, resume_after_worker_id: str) -> None:
+    if not hasattr(reviewer, "worker_ids"):
+        return
+    worker_ids = list(reviewer.worker_ids())
+    if not worker_ids:
+        return
+    if resume_after_worker_id not in worker_ids:
+        raise LLMConfigurationError(
+            f"Resume smoke worker `{resume_after_worker_id}` is not supported by the selected reviewer."
+        )
+    if resume_after_worker_id == worker_ids[-1]:
+        raise LLMConfigurationError(
+            "Resume smoke requires --resume-after-worker-id to stop before the final worker."
+        )
 
 
 def _resolve_llm_config_from_args(args: argparse.Namespace) -> ReviewLLMConfig:
